@@ -13,10 +13,12 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run diagnostic tests in Kubernetes cluster",
-	Long: `Run pod-to-pod diagnostic tests within a Kubernetes cluster.
+	Long: `Run comprehensive connectivity diagnostic tests within a Kubernetes cluster.
 
-The tool will create two netshoot pods on different worker nodes and test 
-connectivity between them by pinging from one pod to another.
+Tests include:
+- Pod-to-Pod Connectivity: Creates two netshoot pods on different worker nodes and tests ping connectivity
+- Service-to-Pod Connectivity: Creates nginx deployment + service and tests DNS resolution and HTTP connectivity
+- Cross-Node Service Connectivity: Tests service connectivity from a remote node to validate kube-proxy inter-node routing
 
 The tool will use the current kubectl context unless --kubeconfig is specified.
 All test resources will be created in the specified namespace (default: diagnostic-test).`,
@@ -36,7 +38,7 @@ All test resources will be created in the specified namespace (default: diagnost
 			fmt.Printf("\n")
 		}
 
-		fmt.Printf("🚀 Running pod-to-pod diagnostic test in namespace '%s'\n\n", namespace)
+		fmt.Printf("🚀 Running connectivity diagnostic tests in namespace '%s'\n\n", namespace)
 
 		// Create tester with default context (no timeout)
 		ctx := context.Background()
@@ -83,9 +85,51 @@ All test resources will be created in the specified namespace (default: diagnost
 		}
 		fmt.Printf("\n")
 
+		// Test 2: Service to Pod Connectivity
+		fmt.Printf("📋 Test 2: Service to Pod Connectivity\n")
+		result2 := tester.TestServiceToPodConnectivity(ctx)
+		testResults = append(testResults, result2)
+		testNames = append(testNames, "Service to Pod Connectivity")
+
+		// Display result for test 2
+		if result2.Success {
+			fmt.Printf("✅ Test 2 PASSED: %s\n", result2.Message)
+		} else {
+			fmt.Printf("❌ Test 2 FAILED: %s\n", result2.Message)
+		}
+
+		if verbose && len(result2.Details) > 0 {
+			fmt.Printf("  Details:\n")
+			for _, detail := range result2.Details {
+				fmt.Printf("    %s\n", detail)
+			}
+		}
+		fmt.Printf("\n")
+
+		// Test 3: Cross-Node Service Connectivity
+		fmt.Printf("📋 Test 3: Cross-Node Service Connectivity\n")
+		result3 := tester.TestCrossNodeServiceConnectivity(ctx)
+		testResults = append(testResults, result3)
+		testNames = append(testNames, "Cross-Node Service Connectivity")
+
+		// Display result for test 3
+		if result3.Success {
+			fmt.Printf("✅ Test 3 PASSED: %s\n", result3.Message)
+		} else {
+			fmt.Printf("❌ Test 3 FAILED: %s\n", result3.Message)
+		}
+
+		if verbose && len(result3.Details) > 0 {
+			fmt.Printf("  Details:\n")
+			for _, detail := range result3.Details {
+				fmt.Printf("    %s\n", detail)
+			}
+		}
+		fmt.Printf("\n")
+
 		// TODO: Add more tests here in the future
-		// Test 2: DNS Resolution
-		// Test 3: Service Connectivity
+		// Test 4: DNS Resolution
+		// Test 5: Ingress Connectivity
 		// etc.
 
 		// Calculate test statistics
