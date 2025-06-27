@@ -1,0 +1,36 @@
+# This is an example of the nginx deployment created by the Service-to-Pod connectivity test
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: diagnostic-test
+spec:
+  replicas: 2          # scale to two Pods so kube-proxy can load-balance
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:alpine        # 7 MB image
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: diagnostic-test
+spec:
+  selector:
+    app: web
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+  type: ClusterIP
