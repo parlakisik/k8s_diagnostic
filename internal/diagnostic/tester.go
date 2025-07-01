@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,27 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/remotecommand"
 )
+
+// evaluateHTTPStatusCode evaluates an HTTP status code and returns success status and descriptive message
+func evaluateHTTPStatusCode(statusCode string) (bool, string) {
+	code, err := strconv.Atoi(statusCode)
+	if err != nil {
+		return false, fmt.Sprintf("Invalid status code: %s", statusCode)
+	}
+
+	switch {
+	case code >= 200 && code < 300:
+		return true, fmt.Sprintf("Success - HTTP %d", code)
+	case code >= 300 && code < 400:
+		return false, fmt.Sprintf("Redirect - HTTP %d (may need to follow redirects)", code)
+	case code >= 400 && code < 500:
+		return false, fmt.Sprintf("Client Error - HTTP %d", code)
+	case code >= 500 && code < 600:
+		return false, fmt.Sprintf("Server Error - HTTP %d", code)
+	default:
+		return false, fmt.Sprintf("Unknown status code: %d", code)
+	}
+}
 
 // TestResult represents the result of a connectivity test
 type TestResult struct {
@@ -319,12 +341,13 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 		}
 	}
 
-	// Check HTTP status code
-	if statusCode == "200" {
+	// Check HTTP status code using helper function
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
 		details = append(details, fmt.Sprintf("✓ Cross-node HTTP connectivity successful - Status: %s", statusCode))
-		details = append(details, fmt.Sprintf("  kubectl run curl-remote --image=curlimages/curl --overrides=nodeSelector --rm -it"))
+		details = append(details, fmt.Sprintf("  Created test pod on remote node with nodeSelector"))
 	} else {
-		details = append(details, fmt.Sprintf("⚠️ Cross-node HTTP returned status: %s (expected: 200)", statusCode))
+		details = append(details, fmt.Sprintf("⚠️ Cross-node HTTP connectivity issue - %s", message))
 	}
 
 	// Show response content if available
@@ -336,13 +359,19 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 	directStatusCode, directContent, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, serviceIP)
 	if err != nil {
 		details = append(details, fmt.Sprintf("⚠️ Direct service IP connectivity failed: %v", err))
-	} else if directStatusCode == "200" {
-		details = append(details, fmt.Sprintf("✓ Direct service IP connectivity successful - Status: %s", directStatusCode))
-		details = append(details, fmt.Sprintf("  curl http://%s from remote node successful", serviceIP))
+	} else {
+		// Check status code using helper function
+		directSuccess, directMessage := evaluateHTTPStatusCode(directStatusCode)
+		if directSuccess {
+			details = append(details, fmt.Sprintf("✓ Direct service IP connectivity successful - Status: %s", directStatusCode))
+			details = append(details, fmt.Sprintf("  curl http://%s from remote node successful", serviceIP))
 
-		// Show response content if available
-		if directContent != "" && strings.Contains(strings.ToLower(directContent), "welcome to nginx") {
-			details = append(details, fmt.Sprintf("  Direct IP response: nginx welcome page detected"))
+			// Show response content if available
+			if directContent != "" && strings.Contains(strings.ToLower(directContent), "welcome to nginx") {
+				details = append(details, fmt.Sprintf("  Direct IP response: nginx welcome page detected"))
+			}
+		} else {
+			details = append(details, fmt.Sprintf("⚠️ Direct service IP connectivity issue - %s", directMessage))
 		}
 	}
 
@@ -477,12 +506,13 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 		}
 	}
 
-	// Check HTTP status code
-	if statusCode == "200" {
+	// Check HTTP status code using helper function
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
 		details = append(details, fmt.Sprintf("✓ HTTP connectivity successful - Status: %s", statusCode))
 		details = append(details, fmt.Sprintf("  curl -s -o /dev/null -w \"%%{http_code}\\n\" http://%s", serviceName))
 	} else {
-		details = append(details, fmt.Sprintf("⚠️ HTTP connectivity returned status: %s (expected: 200)", statusCode))
+		details = append(details, fmt.Sprintf("⚠️ HTTP connectivity issue - %s", message))
 	}
 
 	// Show response content if available
