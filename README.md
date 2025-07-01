@@ -13,17 +13,21 @@ This project provides:
 
 ### Current Tests
 - **Pod-to-Pod Connectivity**: Creates two `nicolaka/netshoot` pods on different worker nodes and tests connectivity using real ping commands
-- **Service-to-Pod Connectivity**: Creates nginx deployment + service and tests DNS resolution, HTTP connectivity, and load balancing
+- **Service-to-Pod Connectivity**: Creates nginx deployment + service and tests HTTP connectivity and load balancing (DNS testing separated)
 - **Cross-Node Service Connectivity**: Tests service connectivity from remote nodes to validate kube-proxy inter-node routing
+- **DNS Resolution**: Dedicated DNS testing including service FQDN resolution, short names, and pod-to-pod DNS validation
 
 ### Key Capabilities
 - **Real Pod Testing**: Uses actual Kubernetes pods, not simulated connections
 - **Cross-Node Communication**: Tests networking between different worker nodes
 - **Service Mesh Validation**: Comprehensive service discovery and load balancing testing
 - **kube-proxy Testing**: Validates inter-node service routing and load balancing
-- **DNS Resolution Testing**: Verifies Kubernetes service DNS functionality
-- **HTTP Status Code Validation**: Tests actual HTTP connectivity with status codes
+- **Dedicated DNS Testing**: Separated DNS resolution testing for focused validation
+- **Flexible HTTP Status Validation**: Accepts 2xx range status codes, not just 200
 - **Load Balancing Verification**: Confirms traffic distribution across multiple replicas
+- **Clean Architecture**: Separated concerns with single responsibility per test
+- **Code Quality**: Zero duplication with reusable helper functions
+- **Honest Output**: Accurate descriptions of actual implementation, no fake commands
 - **Automatic Cleanup**: Creates and removes test resources automatically
 - **Namespace Management**: Isolated testing environment with proper cleanup
 - **Verbose Reporting**: Detailed test steps with equivalent kubectl commands
@@ -139,22 +143,26 @@ Global Options:
 ✅ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
 
 📋 Test 2: Service to Pod Connectivity
-✅ Test 2 PASSED: Service to Pod connectivity test passed - DNS resolution and HTTP connectivity working
+✅ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
 
 📋 Test 3: Cross-Node Service Connectivity
 ✅ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
+
+📋 Test 4: DNS Resolution
+✅ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
 
 🧹 Cleaning up test environment...
 ✓ Namespace diagnostic-test cleaned up
 
 📊 Test Summary:
-  Total Tests: 3, Passed: 3, Failed: 0
+  Total Tests: 4, Passed: 4, Failed: 0
   ✅ Passed Tests:
     • Pod-to-Pod Connectivity
     • Service to Pod Connectivity
     • Cross-Node Service Connectivity
+    • DNS Resolution
 
-✅ Overall Result: All 3 diagnostic tests passed
+✅ Overall Result: All 4 diagnostic tests passed
 💡 Run with --verbose for detailed test steps
 ```
 
