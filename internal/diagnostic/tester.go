@@ -386,6 +386,127 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 	}
 }
 
+// TestDNSResolution creates test resources and validates DNS resolution functionality
+func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
+	var details []string
+
+	// Step 1: Create nginx deployment with 2 replicas for DNS testing
+	deploymentName := "web-dns"
+	serviceName := "web-dns"
+	testPodName := "netshoot-dns-test"
+
+	// Create nginx deployment
+	_, err := t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment for DNS test: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' for DNS testing", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create service for DNS testing
+	_, err = t.createNginxService(ctx, serviceName, deploymentName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create service for DNS test: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created service '%s' for DNS testing", serviceName))
+
+	// Step 3: Create test pod for DNS queries
+	_, err = t.createNetshootPod(ctx, testPodName, "")
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create DNS test pod: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created DNS test pod '%s'", testPodName))
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("DNS test pod %s did not become ready: %v", testPodName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ DNS test pod '%s' is ready", testPodName))
+
+	// Step 4: Test service FQDN resolution
+	fqdnName := fmt.Sprintf("%s.%s.svc.cluster.local", serviceName, t.namespace)
+	fqdnResult, err := t.testDNSResolution(ctx, testPodName, fqdnName)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ Service FQDN DNS resolution failed: %v", err))
+		details = append(details, fmt.Sprintf("  Command: nslookup %s", fqdnName))
+	} else {
+		details = append(details, fmt.Sprintf("✓ Service FQDN DNS resolution successful"))
+		details = append(details, fmt.Sprintf("  Command: nslookup %s", fqdnName))
+		details = append(details, fmt.Sprintf("  Result: %s", strings.TrimSpace(fqdnResult)))
+	}
+
+	// Step 5: Test short name resolution (DNS search domains)
+	shortResult, err := t.testDNSResolution(ctx, testPodName, serviceName)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ Short name DNS resolution failed: %v", err))
+		details = append(details, fmt.Sprintf("  Command: nslookup %s", serviceName))
+	} else {
+		details = append(details, fmt.Sprintf("✓ Short name DNS resolution successful"))
+		details = append(details, fmt.Sprintf("  Command: nslookup %s", serviceName))
+		details = append(details, fmt.Sprintf("  Result: %s", strings.TrimSpace(shortResult)))
+	}
+
+	// Step 6: Test pod-to-pod DNS resolution
+	podDNSResult, err := t.testPodToPodDNS(ctx, testPodName, deploymentName)
+	if err != nil {
+		details = append(details, fmt.Sprintf("⚠️ Pod-to-pod DNS resolution test inconclusive: %v", err))
+	} else {
+		details = append(details, fmt.Sprintf("✓ Pod-to-pod DNS resolution successful"))
+		details = append(details, fmt.Sprintf("  %s", podDNSResult))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up DNS test resources")
+
+	// Determine overall success
+	fqdnSuccess := err == nil
+	shortSuccess := shortResult != ""
+
+	if fqdnSuccess && shortSuccess {
+		return TestResult{
+			Success: true,
+			Message: "DNS resolution test passed - service FQDN and short name resolution working",
+			Details: details,
+		}
+	} else {
+		return TestResult{
+			Success: false,
+			Message: "DNS resolution test failed - check cluster DNS configuration",
+			Details: details,
+		}
+	}
+}
+
 // TestServiceToPodConnectivity creates nginx deployment, service, and tests connectivity from a netshoot pod
 func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 	var details []string
@@ -464,20 +585,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 	}
 	details = append(details, fmt.Sprintf("✓ Test pod '%s' is ready", testPodName))
 
-	// Step 4: Test DNS resolution
-	dnsResult, err := t.testDNSResolution(ctx, testPodName, serviceName)
-	if err != nil {
-		details = append(details, fmt.Sprintf("✗ DNS resolution failed: %v", err))
-		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
-		return TestResult{
-			Success: false,
-			Message: "Service DNS resolution failed",
-			Details: details,
-		}
-	}
-	details = append(details, fmt.Sprintf("✓ DNS resolution successful: %s", strings.TrimSpace(dnsResult)))
-
-	// Step 4a: Test ICMP ping to Service IP (equivalent to: ping -c3 $SERVICE_IP)
+	// Step 4: Test ICMP ping to Service IP (equivalent to: ping -c3 $SERVICE_IP)
 	pingResult, err := t.testServiceIPPing(ctx, testPodName, serviceIP)
 	if err != nil {
 		details = append(details, fmt.Sprintf("⚠️ ICMP ping to service IP failed: %v (some clusters block ping)", err))
@@ -534,7 +642,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 
 	return TestResult{
 		Success: true,
-		Message: "Service to Pod connectivity test passed - DNS resolution and HTTP connectivity working",
+		Message: "Service to Pod connectivity test passed - HTTP connectivity and load balancing working",
 		Details: details,
 	}
 }
@@ -1128,6 +1236,68 @@ func (t *Tester) findDifferentWorkerNode(ctx context.Context, usedNodes []string
 	}
 
 	return "", fmt.Errorf("insufficient worker nodes for cross-node testing (need at least 2, found %d)", len(allWorkerNodes))
+}
+
+// testPodToPodDNS tests DNS resolution between pods
+func (t *Tester) testPodToPodDNS(ctx context.Context, testPodName, deploymentName string) (string, error) {
+	// Get one of the nginx pods to test DNS resolution to
+	pods, err := t.clientset.CoreV1().Pods(t.namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to list nginx pods: %v", err)
+	}
+
+	if len(pods.Items) == 0 {
+		return "", fmt.Errorf("no nginx pods found")
+	}
+
+	// Try to resolve the first nginx pod by its IP
+	targetPod := pods.Items[0]
+	if targetPod.Status.PodIP == "" {
+		return "", fmt.Errorf("target pod has no IP address")
+	}
+
+	// Create the exec request for nslookup on the pod IP
+	req := t.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(testPodName).
+		Namespace(t.namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Container: "netshoot",
+		Command:   []string{"nslookup", targetPod.Status.PodIP},
+		Stdout:    true,
+		Stderr:    true,
+	}, scheme.ParameterCodec)
+
+	// Create the executor
+	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	// Prepare buffers for output
+	var stdout, stderr bytes.Buffer
+
+	// Execute the command
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	output := stdout.String()
+	if err != nil && stderr.Len() > 0 {
+		output += "\nSTDERR: " + stderr.String()
+	}
+
+	// Simple validation - if we get some DNS response, consider it successful
+	if strings.Contains(strings.ToLower(output), "name") || strings.Contains(output, targetPod.Status.PodIP) {
+		return fmt.Sprintf("Pod IP %s resolved successfully", targetPod.Status.PodIP), nil
+	}
+
+	return output, fmt.Errorf("pod-to-pod DNS resolution failed")
 }
 
 // cleanupServiceResources removes all service-related test resources

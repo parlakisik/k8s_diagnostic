@@ -17,8 +17,9 @@ var testCmd = &cobra.Command{
 
 Tests include:
 - Pod-to-Pod Connectivity: Creates two netshoot pods on different worker nodes and tests ping connectivity
-- Service-to-Pod Connectivity: Creates nginx deployment + service and tests DNS resolution and HTTP connectivity
+- Service-to-Pod Connectivity: Creates nginx deployment + service and tests HTTP connectivity and load balancing
 - Cross-Node Service Connectivity: Tests service connectivity from a remote node to validate kube-proxy inter-node routing
+- DNS Resolution: Tests service DNS resolution including FQDN, short names, and pod-to-pod DNS
 
 The tool will use the current kubectl context unless --kubeconfig is specified.
 All test resources will be created in the specified namespace (default: diagnostic-test).`,
@@ -68,6 +69,7 @@ All test resources will be created in the specified namespace (default: diagnost
 		executeTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &testResults, &testNames)
 		executeTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &testResults, &testNames)
 		executeTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &testResults, &testNames)
 
 		// TODO: Add more tests here in the future
 		// Test 4: DNS Resolution
