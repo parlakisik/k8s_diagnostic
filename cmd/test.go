@@ -64,68 +64,10 @@ All test resources will be created in the specified namespace (default: diagnost
 		var testResults []diagnostic.TestResult
 		var testNames []string
 
-		// Test 1: Pod-to-Pod Connectivity
-		fmt.Printf("📋 Test 1: Pod-to-Pod Connectivity\n")
-		result1 := tester.TestPodToPodConnectivity(ctx)
-		testResults = append(testResults, result1)
-		testNames = append(testNames, "Pod-to-Pod Connectivity")
-
-		// Display result for test 1
-		if result1.Success {
-			fmt.Printf("✅ Test 1 PASSED: %s\n", result1.Message)
-		} else {
-			fmt.Printf("❌ Test 1 FAILED: %s\n", result1.Message)
-		}
-
-		if verbose && len(result1.Details) > 0 {
-			fmt.Printf("  Details:\n")
-			for _, detail := range result1.Details {
-				fmt.Printf("    %s\n", detail)
-			}
-		}
-		fmt.Printf("\n")
-
-		// Test 2: Service to Pod Connectivity
-		fmt.Printf("📋 Test 2: Service to Pod Connectivity\n")
-		result2 := tester.TestServiceToPodConnectivity(ctx)
-		testResults = append(testResults, result2)
-		testNames = append(testNames, "Service to Pod Connectivity")
-
-		// Display result for test 2
-		if result2.Success {
-			fmt.Printf("✅ Test 2 PASSED: %s\n", result2.Message)
-		} else {
-			fmt.Printf("❌ Test 2 FAILED: %s\n", result2.Message)
-		}
-
-		if verbose && len(result2.Details) > 0 {
-			fmt.Printf("  Details:\n")
-			for _, detail := range result2.Details {
-				fmt.Printf("    %s\n", detail)
-			}
-		}
-		fmt.Printf("\n")
-
-		// Test 3: Cross-Node Service Connectivity
-		fmt.Printf("📋 Test 3: Cross-Node Service Connectivity\n")
-		result3 := tester.TestCrossNodeServiceConnectivity(ctx)
-		testResults = append(testResults, result3)
-		testNames = append(testNames, "Cross-Node Service Connectivity")
-
-		// Display result for test 3
-		if result3.Success {
-			fmt.Printf("✅ Test 3 PASSED: %s\n", result3.Message)
-		} else {
-			fmt.Printf("❌ Test 3 FAILED: %s\n", result3.Message)
-		}
-
-		if verbose && len(result3.Details) > 0 {
-			fmt.Printf("  Details:\n")
-			for _, detail := range result3.Details {
-				fmt.Printf("    %s\n", detail)
-			}
-		}
-		fmt.Printf("\n")
+		// Execute all tests using helper function
+		executeTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &testResults, &testNames)
 
 		// TODO: Add more tests here in the future
 		// Test 4: DNS Resolution
@@ -228,6 +170,32 @@ All test resources will be created in the specified namespace (default: diagnost
 			}
 		}
 	},
+}
+
+// executeTest is a helper function that eliminates repetitive test execution code
+func executeTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
+	ctx context.Context, verbose bool, testResults *[]diagnostic.TestResult, testNames *[]string) {
+
+	fmt.Printf("📋 Test %d: %s\n", testNum, testName)
+	result := testFunc(ctx)
+	*testResults = append(*testResults, result)
+	*testNames = append(*testNames, testName)
+
+	// Display result
+	if result.Success {
+		fmt.Printf("✅ Test %d PASSED: %s\n", testNum, result.Message)
+	} else {
+		fmt.Printf("❌ Test %d FAILED: %s\n", testNum, result.Message)
+	}
+
+	// Show verbose details if enabled
+	if verbose && len(result.Details) > 0 {
+		fmt.Printf("  Details:\n")
+		for _, detail := range result.Details {
+			fmt.Printf("    %s\n", detail)
+		}
+	}
+	fmt.Printf("\n")
 }
 
 func init() {
