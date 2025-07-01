@@ -13,10 +13,13 @@ import (
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run diagnostic tests in Kubernetes cluster",
-	Long: `Run pod-to-pod diagnostic tests within a Kubernetes cluster.
+	Long: `Run comprehensive connectivity diagnostic tests within a Kubernetes cluster.
 
-The tool will create two netshoot pods on different worker nodes and test 
-connectivity between them by pinging from one pod to another.
+Tests include:
+- Pod-to-Pod Connectivity: Creates two netshoot pods on different worker nodes and tests ping connectivity
+- Service-to-Pod Connectivity: Creates nginx deployment + service and tests HTTP connectivity and load balancing
+- Cross-Node Service Connectivity: Tests service connectivity from a remote node to validate kube-proxy inter-node routing
+- DNS Resolution: Tests service DNS resolution including FQDN, short names, and pod-to-pod DNS
 
 The tool will use the current kubectl context unless --kubeconfig is specified.
 All test resources will be created in the specified namespace (default: diagnostic-test).`,
@@ -36,7 +39,7 @@ All test resources will be created in the specified namespace (default: diagnost
 			fmt.Printf("\n")
 		}
 
-		fmt.Printf("🚀 Running pod-to-pod diagnostic test in namespace '%s'\n\n", namespace)
+		fmt.Printf("🚀 Running connectivity diagnostic tests in namespace '%s'\n\n", namespace)
 
 		// Create tester with default context (no timeout)
 		ctx := context.Background()
@@ -62,30 +65,15 @@ All test resources will be created in the specified namespace (default: diagnost
 		var testResults []diagnostic.TestResult
 		var testNames []string
 
-		// Test 1: Pod-to-Pod Connectivity
-		fmt.Printf("📋 Test 1: Pod-to-Pod Connectivity\n")
-		result1 := tester.TestPodToPodConnectivity(ctx)
-		testResults = append(testResults, result1)
-		testNames = append(testNames, "Pod-to-Pod Connectivity")
-
-		// Display result for test 1
-		if result1.Success {
-			fmt.Printf("✅ Test 1 PASSED: %s\n", result1.Message)
-		} else {
-			fmt.Printf("❌ Test 1 FAILED: %s\n", result1.Message)
-		}
-
-		if verbose && len(result1.Details) > 0 {
-			fmt.Printf("  Details:\n")
-			for _, detail := range result1.Details {
-				fmt.Printf("    %s\n", detail)
-			}
-		}
-		fmt.Printf("\n")
+		// Execute all tests using helper function
+		executeTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &testResults, &testNames)
+		executeTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &testResults, &testNames)
 
 		// TODO: Add more tests here in the future
-		// Test 2: DNS Resolution
-		// Test 3: Service Connectivity
+		// Test 4: DNS Resolution
+		// Test 5: Ingress Connectivity
 		// etc.
 
 		// Calculate test statistics
@@ -184,6 +172,32 @@ All test resources will be created in the specified namespace (default: diagnost
 			}
 		}
 	},
+}
+
+// executeTest is a helper function that eliminates repetitive test execution code
+func executeTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
+	ctx context.Context, verbose bool, testResults *[]diagnostic.TestResult, testNames *[]string) {
+
+	fmt.Printf("📋 Test %d: %s\n", testNum, testName)
+	result := testFunc(ctx)
+	*testResults = append(*testResults, result)
+	*testNames = append(*testNames, testName)
+
+	// Display result
+	if result.Success {
+		fmt.Printf("✅ Test %d PASSED: %s\n", testNum, result.Message)
+	} else {
+		fmt.Printf("❌ Test %d FAILED: %s\n", testNum, result.Message)
+	}
+
+	// Show verbose details if enabled
+	if verbose && len(result.Details) > 0 {
+		fmt.Printf("  Details:\n")
+		for _, detail := range result.Details {
+			fmt.Printf("    %s\n", detail)
+		}
+	}
+	fmt.Printf("\n")
 }
 
 func init() {
