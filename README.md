@@ -420,7 +420,7 @@ test_results/k8s-diagnostic-results-YYYYMMDD-HHMMSS.json
 
 The JSON logging uses an intelligent approach to balance file size with debugging capability:
 
-**✅ Successful Tests (Clean Format):**
+**✓ Successful Tests (Clean Format):**
 ```json
 {
   "test_number": 1,
@@ -432,7 +432,7 @@ The JSON logging uses an intelligent approach to balance file size with debuggin
 }
 ```
 
-**❌ Failed Tests (Full Debug Details):**
+**✗ Failed Tests (Full Debug Details):**
 ```json
 {
   "test_number": 1,
@@ -645,13 +645,13 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 // cmd/test.go
 
 // Add after Test 1: Pod-to-Pod Connectivity
-fmt.Printf("📋 Test 2: DNS Resolution\n")
+fmt.Printf("Test 2: DNS Resolution\n")
 result2 := tester.TestDNSResolution(ctx)
 
 if result2.Success {
-    fmt.Printf("✅ Test 2 PASSED: %s\n", result2.Message)
+    fmt.Printf("✓ Test 2 PASSED: %s\n", result2.Message)
 } else {
-    fmt.Printf("❌ Test 2 FAILED: %s\n", result2.Message)
+    fmt.Printf("✗ Test 2 FAILED: %s\n", result2.Message)
 }
 
 // Update overall result logic
