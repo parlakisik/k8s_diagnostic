@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s-diagnostic/internal/diagnostic"
 
@@ -27,6 +28,9 @@ All test resources will be created in the specified namespace (default: diagnost
 		kubeconfig, _ := cmd.Flags().GetString("kubeconfig")
 		namespace, _ := cmd.Flags().GetString("namespace")
 		verbose, _ := cmd.Flags().GetBool("verbose")
+
+		// Record overall start time
+		overallStartTime := time.Now()
 
 		if verbose {
 			fmt.Printf("🔍 Configuration:\n")
@@ -61,20 +65,24 @@ All test resources will be created in the specified namespace (default: diagnost
 		// Run all diagnostic tests
 		fmt.Printf("🧪 Running diagnostic tests...\n")
 
-		// Store test results for summary
-		var testResults []diagnostic.TestResult
+		// Store timed test results for JSON output
+		var timedResults []diagnostic.TimedTestResult
 		var testNames []string
 
-		// Execute all tests using helper function
-		executeTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &testResults, &testNames)
-		executeTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &testResults, &testNames)
-		executeTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &testResults, &testNames)
-		executeTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &testResults, &testNames)
+		// Execute all tests with timing
+		executeTimedTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &timedResults, &testNames)
+		executeTimedTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &timedResults, &testNames)
+		executeTimedTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+		executeTimedTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &timedResults, &testNames)
 
-		// TODO: Add more tests here in the future
-		// Test 4: DNS Resolution
-		// Test 5: Ingress Connectivity
-		// etc.
+		// Record overall end time
+		overallEndTime := time.Now()
+
+		// Extract basic test results for summary calculations
+		var testResults []diagnostic.TestResult
+		for _, timedResult := range timedResults {
+			testResults = append(testResults, timedResult.TestResult)
+		}
 
 		// Calculate test statistics
 		totalTests := len(testResults)
@@ -129,6 +137,28 @@ All test resources will be created in the specified namespace (default: diagnost
 			fmt.Printf("✓ Namespace %s cleaned up\n", namespace)
 		}
 
+		// Generate and save JSON report
+		kubeconfigSource := "default"
+		if kubeconfig != "" {
+			kubeconfigSource = kubeconfig
+		}
+
+		jsonReport := diagnostic.CreateJSONReport(
+			namespace,
+			kubeconfigSource,
+			verbose,
+			timedResults,
+			testNames,
+			overallStartTime,
+			overallEndTime,
+		)
+
+		if err := diagnostic.SaveJSONReport(&jsonReport); err != nil {
+			fmt.Printf("⚠️  Warning: Failed to save JSON report: %v\n", err)
+		} else {
+			fmt.Printf("📄 JSON report saved: test_results/%s\n", jsonReport.ExecutionInfo.Filename)
+		}
+
 		// Display test summary
 		fmt.Printf("\n📊 Test Summary:\n")
 		fmt.Printf("  Total Tests: %d, Passed: %d, Failed: %d\n", totalTests, passedTests, failedTests)
@@ -174,13 +204,29 @@ All test resources will be created in the specified namespace (default: diagnost
 	},
 }
 
-// executeTest is a helper function that eliminates repetitive test execution code
-func executeTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
-	ctx context.Context, verbose bool, testResults *[]diagnostic.TestResult, testNames *[]string) {
+// executeTimedTest is a helper function that captures timing information for each test
+func executeTimedTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
+	ctx context.Context, verbose bool, timedResults *[]diagnostic.TimedTestResult, testNames *[]string) {
 
 	fmt.Printf("📋 Test %d: %s\n", testNum, testName)
+
+	// Capture start time
+	startTime := time.Now()
+
+	// Execute test
 	result := testFunc(ctx)
-	*testResults = append(*testResults, result)
+
+	// Capture end time
+	endTime := time.Now()
+
+	// Create timed result
+	timedResult := diagnostic.TimedTestResult{
+		TestResult: result,
+		StartTime:  startTime,
+		EndTime:    endTime,
+	}
+
+	*timedResults = append(*timedResults, timedResult)
 	*testNames = append(*testNames, testName)
 
 	// Display result
