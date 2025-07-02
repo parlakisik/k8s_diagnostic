@@ -87,7 +87,7 @@ cluster_exists() {
 
 # Delete the cluster
 delete_cluster() {
-    print_info "🔍 Checking if cluster '$CLUSTER_NAME' exists..."
+    print_info "Checking if cluster '$CLUSTER_NAME' exists..."
     
     if ! cluster_exists; then
         print_warn "Cluster '$CLUSTER_NAME' does not exist"
@@ -106,19 +106,19 @@ delete_cluster() {
         fi
     fi
     
-    print_info "🗑️  Deleting kind cluster: $CLUSTER_NAME"
+    print_info "Deleting kind cluster: $CLUSTER_NAME"
     
     if kind delete cluster --name "$CLUSTER_NAME"; then
-        print_info "✅ Cluster '$CLUSTER_NAME' deleted successfully"
+        print_info "Cluster '$CLUSTER_NAME' deleted successfully"
     else
-        print_error "❌ Failed to delete cluster '$CLUSTER_NAME'"
+        print_error "Failed to delete cluster '$CLUSTER_NAME'"
         exit 1
     fi
 }
 
 # Clean up any leftover resources
 cleanup_resources() {
-    print_info "🧹 Cleaning up leftover resources..."
+    print_info "Cleaning up leftover resources..."
     
     # Remove any leftover kubectl contexts for this cluster
     local context_name="kind-${CLUSTER_NAME}"
@@ -156,7 +156,7 @@ show_remaining_clusters() {
 
 # Main execution
 main() {
-    echo "🗑️  Kind Cluster Deletion Script"
+    echo "Kind Cluster Deletion Script"
     echo "================================"
     echo ""
     
@@ -165,8 +165,8 @@ main() {
     cleanup_resources
     show_remaining_clusters
     
-    print_info "Done! 🎉"
+    print_info "Done!"
 }
 
 # Run main function
-main "$@" 
+main "$@"

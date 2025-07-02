@@ -251,7 +251,7 @@ show_cluster_info() {
 
 # Main execution
 main() {
-    echo "🚀 Building Test Kubernetes Cluster with Cilium CNI"
+    echo "Building Test Kubernetes Cluster with Cilium CNI"
     echo "=================================================="
     echo ""
     
@@ -260,7 +260,7 @@ main() {
     install_cilium
     show_cluster_info
     
-    print_info "🎉 Test Kubernetes cluster '$CLUSTER_NAME' is ready!"
+    print_info "Test Kubernetes cluster '$CLUSTER_NAME' is ready!"
     print_info "You can now run diagnostic tests using the k8s-diagnostic CLI tool"
     print_info ""
     print_info "To delete this cluster later, run:"
@@ -268,4 +268,4 @@ main() {
 }
 
 # Run main function
-main "$@" 
+main "$@"
