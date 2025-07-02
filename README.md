@@ -114,7 +114,7 @@ This project provides:
    - Creates `netshoot-service-test` pod (no specific node placement)
    - Tests: `ping -c 3 -W 3 [service_IP]`
    - **Expected:** Many clusters block ICMP to service IPs
-   - Common result: "⚠️ ICMP ping to service IP failed (some clusters block ping)"
+   - Common result: "WARNING: ICMP ping to service IP failed (some clusters block ping)"
 
 6. **Test HTTP Connectivity**
    - Primary test: `curl -s -o /dev/null -w "%{http_code}" http://web`
@@ -352,38 +352,40 @@ Global Options:
 
 ### Standard Output
 ```
-🚀 Running connectivity diagnostic tests in namespace 'diagnostic-test'
+Running connectivity diagnostic tests in namespace 'diagnostic-test'
 
-🔧 Setting up test environment...
-✓ Namespace diagnostic-test ready
+Setting up test environment...
+Namespace diagnostic-test ready
 
-🧪 Running diagnostic tests...
-📋 Test 1: Pod-to-Pod Connectivity
-✅ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
+Running diagnostic tests...
+Test 1: Pod-to-Pod Connectivity
+✓ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
 
-📋 Test 2: Service to Pod Connectivity
-✅ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
+Test 2: Service to Pod Connectivity
+✓ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
 
-📋 Test 3: Cross-Node Service Connectivity
-✅ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
+Test 3: Cross-Node Service Connectivity
+✓ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
 
-📋 Test 4: DNS Resolution
-✅ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
+Test 4: DNS Resolution
+✓ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
 
-🧹 Cleaning up test environment...
-✓ Namespace diagnostic-test cleaned up
-📄 JSON report saved: test_results/k8s-diagnostic-results-20250702-101146.json
+Cleaning up test environment...
+Namespace diagnostic-test cleaned up
+JSON report saved: test_results/k8s-diagnostic-results-20250702-101146.json
 
-📊 Test Summary:
+Test Summary:
   Total Tests: 4, Passed: 4, Failed: 0
-  ✅ Passed Tests:
-    • Pod-to-Pod Connectivity
-    • Service to Pod Connectivity
-    • Cross-Node Service Connectivity
-    • DNS Resolution
+  Passed Tests:
+    ✓ Pod-to-Pod Connectivity
+    ✓ Service to Pod Connectivity
+    ✓ Cross-Node Service Connectivity
+    ✓ DNS Resolution
 
-✅ Overall Result: All 4 diagnostic tests passed
-💡 Run with --verbose for detailed test steps
+✓ Overall Result: All 4 diagnostic tests passed
+Run with --verbose for detailed test steps
+
+Detailed results are stored in JSON file in the test_results/ folder for further analysis
 ```
 
 ### Verbose Output
@@ -523,10 +525,10 @@ LATEST_RESULT=$(ls -t test_results/*.json | head -1)
 STATUS=$(cat "$LATEST_RESULT" | jq -r '.summary.overall_status')
 
 if [[ "$STATUS" == "PASSED" ]]; then
-  echo "✅ All connectivity tests passed"
+  echo "✓ All connectivity tests passed"
   exit 0
 else
-  echo "❌ Connectivity tests failed"
+  echo "✗ Connectivity tests failed"
   cat "$LATEST_RESULT" | jq '.summary.errors_encountered'
   exit 1
 fi

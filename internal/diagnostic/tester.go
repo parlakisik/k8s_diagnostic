@@ -347,7 +347,7 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 		details = append(details, fmt.Sprintf("✓ Cross-node HTTP connectivity successful - Status: %s", statusCode))
 		details = append(details, fmt.Sprintf("  Created test pod on remote node with nodeSelector"))
 	} else {
-		details = append(details, fmt.Sprintf("⚠️ Cross-node HTTP connectivity issue - %s", message))
+		details = append(details, fmt.Sprintf("WARNING: Cross-node HTTP connectivity issue - %s", message))
 	}
 
 	// Show response content if available
@@ -358,7 +358,7 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 	// Step 8: Test cross-node service IP connectivity
 	directStatusCode, directContent, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, serviceIP)
 	if err != nil {
-		details = append(details, fmt.Sprintf("⚠️ Direct service IP connectivity failed: %v", err))
+		details = append(details, fmt.Sprintf("WARNING: Direct service IP connectivity failed: %v", err))
 	} else {
 		// Check status code using helper function
 		directSuccess, directMessage := evaluateHTTPStatusCode(directStatusCode)
@@ -371,7 +371,7 @@ func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResul
 				details = append(details, fmt.Sprintf("  Direct IP response: nginx welcome page detected"))
 			}
 		} else {
-			details = append(details, fmt.Sprintf("⚠️ Direct service IP connectivity issue - %s", directMessage))
+			details = append(details, fmt.Sprintf("WARNING: Direct service IP connectivity issue - %s", directMessage))
 		}
 	}
 
@@ -478,7 +478,7 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 	// Step 6: Test pod-to-pod DNS resolution
 	podDNSResult, err := t.testPodToPodDNS(ctx, testPodName, deploymentName)
 	if err != nil {
-		details = append(details, fmt.Sprintf("⚠️ Pod-to-pod DNS resolution test inconclusive: %v", err))
+		details = append(details, fmt.Sprintf("WARNING: Pod-to-pod DNS resolution test inconclusive: %v", err))
 	} else {
 		details = append(details, fmt.Sprintf("✓ Pod-to-pod DNS resolution successful"))
 		details = append(details, fmt.Sprintf("  %s", podDNSResult))
@@ -588,7 +588,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 	// Step 4: Test ICMP ping to Service IP (equivalent to: ping -c3 $SERVICE_IP)
 	pingResult, err := t.testServiceIPPing(ctx, testPodName, serviceIP)
 	if err != nil {
-		details = append(details, fmt.Sprintf("⚠️ ICMP ping to service IP failed: %v (some clusters block ping)", err))
+		details = append(details, fmt.Sprintf("WARNING: ICMP ping to service IP failed: %v (some clusters block ping)", err))
 		details = append(details, fmt.Sprintf("  Output: %s", strings.TrimSpace(pingResult)))
 	} else {
 		// Check for successful ping patterns
@@ -598,7 +598,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 			(strings.Contains(pingLower, "transmitted") && strings.Contains(pingLower, "received") && !strings.Contains(pingLower, "100% packet loss")) {
 			details = append(details, fmt.Sprintf("✓ ICMP ping to service IP %s successful", serviceIP))
 		} else {
-			details = append(details, fmt.Sprintf("⚠️ ICMP ping to service IP %s failed (some clusters block ping)", serviceIP))
+			details = append(details, fmt.Sprintf("WARNING: ICMP ping to service IP %s failed (some clusters block ping)", serviceIP))
 		}
 	}
 
@@ -620,7 +620,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 		details = append(details, fmt.Sprintf("✓ HTTP connectivity successful - Status: %s", statusCode))
 		details = append(details, fmt.Sprintf("  curl -s -o /dev/null -w \"%%{http_code}\\n\" http://%s", serviceName))
 	} else {
-		details = append(details, fmt.Sprintf("⚠️ HTTP connectivity issue - %s", message))
+		details = append(details, fmt.Sprintf("WARNING: HTTP connectivity issue - %s", message))
 	}
 
 	// Show response content if available
@@ -631,7 +631,7 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 	// Step 6: Test load balancing by making multiple requests
 	lbResult, err := t.testLoadBalancing(ctx, testPodName, serviceName)
 	if err != nil {
-		details = append(details, fmt.Sprintf("⚠️ Load balancing test inconclusive: %v", err))
+		details = append(details, fmt.Sprintf("WARNING: Load balancing test inconclusive: %v", err))
 	} else {
 		details = append(details, fmt.Sprintf("✓ Load balancing verified: %s", lbResult))
 	}
