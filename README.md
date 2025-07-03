@@ -306,6 +306,155 @@ make install
 ./k8s-diagnostic test --kubeconfig /path/to/kubeconfig
 ```
 
+## Interactive Pod Selection
+
+The k8s-diagnostic tool now supports **Interactive Pod Discovery & Selection**, allowing you to test connectivity using existing pods in your cluster instead of creating new ones.
+
+### Smart Pod Discovery
+
+The tool can intelligently discover and score existing pods in your cluster:
+
+```bash
+# Interactive mode - discover and select pods
+./k8s-diagnostic test --interactive --target-namespace default
+
+# Example output:
+Interactive Pod Discovery Mode
+
+Discovering pods in namespace 'default'...
+
+Discovered Pods:
+[1] netshoot-1 (Running) on worker-node-1 - IP: 192.168.1.10 [netshoot]
+[2] netshoot-2 (Running) on worker-node-2 - IP: 192.168.1.20 [netshoot]  
+[3] debug-pod (Running) on worker-node-1 - IP: 192.168.1.30 [network-capable]
+
+Recommendation: Pods 1 and 2 for cross-node testing
+
+Select pods for testing (e.g., 1,2 or just press Enter for recommended): 1,2
+
+Selected Configuration:
+  - Mode: Using existing pods
+  - Target namespace: default
+  - Pod selector: app=netshoot
+```
+
+### New CLI Flags
+
+#### Interactive Mode Flags
+```bash
+--interactive                 # Enable interactive pod discovery and selection
+--auto-create-missing        # Automatically create pods if insufficient for testing  
+--prefer-cross-node          # Prioritize pods on different nodes (default: true)
+--show-all-pods              # Include non-netshoot pods in discovery
+```
+
+#### Existing Pods Mode Flags  
+```bash
+--use-existing-pods          # Test existing pods instead of creating new ones
+--target-namespace string    # Namespace to search for existing pods (default: "default")
+--pod-selector string        # Label selector for finding existing pods (default: "app=netshoot")
+```
+
+### Key Features
+
+**Smart Pod Scoring:**
+- **Netshoot pods** get highest priority (automatic detection)
+- **Network-capable images** (busybox, alpine, ubuntu) get medium priority  
+- **Ready pods** get bonus points
+- **Long-running pods** (sleep commands) get preference
+
+**Cross-Node Optimization:**
+- Automatically detects pods on different nodes
+- Prioritizes cross-node pairs for optimal testing
+- Shows node information in discovery interface
+
+**Intelligent Fallbacks:**
+- **No pods found** → Offers to create fresh pods
+- **Insufficient pods** → Offers to create additional pods  
+- **Auto-create mode** → Seamless fallback without user prompts
+
+### Usage Examples
+
+#### Basic Interactive Mode
+```bash
+# Discover pods and interactively select
+./k8s-diagnostic test --interactive --target-namespace production
+
+# Auto-create missing pods (no prompts)  
+./k8s-diagnostic test --interactive --auto-create-missing
+
+# Show all pods, not just network-capable ones
+./k8s-diagnostic test --interactive --show-all-pods
+```
+
+#### Direct Existing Pods Mode
+```bash
+# Test existing netshoot pods in default namespace
+./k8s-diagnostic test --use-existing-pods
+
+# Test existing pods with custom selector
+./k8s-diagnostic test --use-existing-pods --pod-selector "app=debug-tools"
+
+# Test existing pods in specific namespace
+./k8s-diagnostic test --use-existing-pods --target-namespace kube-system --pod-selector "app=network-test"
+```
+
+#### Combined with Other Flags
+```bash
+# Interactive mode with verbose output and custom kubeconfig
+./k8s-diagnostic test --interactive --verbose --kubeconfig ~/.kube/prod-config
+
+# Existing pods mode with custom test namespace
+./k8s-diagnostic test --use-existing-pods --namespace custom-diagnostic-ns --verbose
+```
+
+### Behavior Differences
+
+**Traditional Mode (Default):**
+- Creates fresh `netshoot-test-1` and `netshoot-test-2` pods
+- Uses `diagnostic-test` namespace (or custom via `--namespace`)
+- Deleting external pods has **no effect** on tests
+- Always gets consistent, clean test environment
+
+**Existing Pods Mode:**
+- Uses your existing pods from specified namespace
+- Discovers pods with intelligent scoring and recommendations
+- Deleting pods **actually breaks the tests** (validates real pod dependencies!)
+- Tests real-world scenarios with your actual cluster state
+
+**Interactive Mode:**
+- Combines discovery with user choice
+- Visual interface with pod scoring indicators
+- Smart recommendations for optimal testing
+- Graceful fallbacks when insufficient pods available
+
+### Perfect For
+
+**Development & Debugging:**
+- Test connectivity between your actual application pods
+- Validate network policies with real workloads  
+- Debug cross-node issues with existing deployments
+
+**CI/CD Integration:**
+- Auto-create mode for automated pipelines
+- Test connectivity of newly deployed applications
+- Validate multi-namespace networking
+
+**Production Validation:**
+- Test connectivity without creating additional resources
+- Use existing monitoring/debug pods for network validation
+- Validate service mesh functionality with real workloads
+
+### Important Notes
+
+- **Pod Requirements:** Existing pods must have network debugging tools (netshoot, busybox, alpine, etc.)
+- **Cross-Node Testing:** Tool automatically selects pods on different nodes when possible
+- **Graceful Degradation:** Falls back to same-node testing if cross-node pods unavailable
+- **Resource Safety:** Never modifies or deletes your existing pods
+- **Namespace Isolation:** Diagnostic resources still created in separate test namespace
+
+---
+
 ## Usage
 
 ### Build Script Options
