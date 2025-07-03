@@ -28,6 +28,23 @@ All test resources will be created in the specified namespace (default: diagnost
 		kubeconfig, _ := cmd.Flags().GetString("kubeconfig")
 		namespace, _ := cmd.Flags().GetString("namespace")
 		verbose, _ := cmd.Flags().GetBool("verbose")
+		useExistingPods, _ := cmd.Flags().GetBool("use-existing-pods")
+		targetNamespace, _ := cmd.Flags().GetString("target-namespace")
+		podSelector, _ := cmd.Flags().GetString("pod-selector")
+
+		// Create test configuration
+		_ = diagnostic.TestConfig{
+			UseExistingPods: useExistingPods,
+			TargetNamespace: targetNamespace,
+			PodSelector:     podSelector,
+			CreateFreshPods: !useExistingPods,
+		}
+
+		// TODO: Implement existing pods functionality
+		// For now, display configuration if using existing pods mode
+		if useExistingPods {
+			fmt.Printf("NOTE: Using existing pods mode - target namespace: %s, selector: %s\n", targetNamespace, podSelector)
+		}
 
 		// Record overall start time
 		overallStartTime := time.Now()
@@ -255,4 +272,7 @@ func init() {
 	// Local flags for the test command
 	testCmd.Flags().StringP("namespace", "n", "diagnostic-test", "namespace to run diagnostic tests in")
 	testCmd.Flags().String("kubeconfig", "", "path to kubeconfig file (inherits from global flag)")
+	testCmd.Flags().Bool("use-existing-pods", false, "test existing pods instead of creating new ones")
+	testCmd.Flags().String("target-namespace", "default", "namespace to search for existing pods (when using --use-existing-pods)")
+	testCmd.Flags().String("pod-selector", "app=netshoot", "label selector for finding existing pods")
 }
