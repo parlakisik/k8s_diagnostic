@@ -1,0 +1,79 @@
+{
+  "execution_info": {
+    "timestamp": "2025-07-03T08:27:53-07:00",
+    "filename": "k8s-diagnostic-results-20250703-083554.json",
+    "namespace": "diagnostic-test",
+    "kubeconfig_source": "/Users/daryakut/Desktop/test1/mgmt/mgmt-eks-a-cluster.kubeconfig",
+    "verbose_mode": true
+  },
+  "tests": [
+    {
+      "test_number": 1,
+      "test_name": "Pod-to-Pod Connectivity",
+      "description": "Validates direct pod communication across different worker nodes, testing CNI networking and inter-node communication",
+      "status": "FAILED",
+      "error_message": "Pod netshoot-test-1 did not become ready: pod netshoot-test-1 did not become ready within 2m0s",
+      "details": [
+        "✓ Found 2 worker nodes",
+        "✓ Created pod netshoot-test-1 on node mgmt-md-0-x2rvt-cmkth",
+        "✓ Created pod netshoot-test-2 on node mgmt-md-0-x2rvt-nvvrs"
+      ],
+      "start_time": "2025-07-03T08:27:53-07:00",
+      "end_time": "2025-07-03T08:29:54-07:00",
+      "execution_time_seconds": 120.1501575
+    },
+    {
+      "test_number": 2,
+      "test_name": "Service to Pod Connectivity",
+      "description": "Validates Kubernetes service discovery, HTTP connectivity, and load balancing across multiple pod replicas",
+      "status": "FAILED",
+      "error_message": "Deployment web did not become ready: deployment web did not become ready within 2m0s",
+      "details": [
+        "✓ Created nginx deployment 'web' with 2 replicas"
+      ],
+      "start_time": "2025-07-03T08:29:54-07:00",
+      "end_time": "2025-07-03T08:31:54-07:00",
+      "execution_time_seconds": 120.026866458
+    },
+    {
+      "test_number": 3,
+      "test_name": "Cross-Node Service Connectivity",
+      "description": "Validates kube-proxy inter-node routing by ensuring services work when accessed from pods on different nodes",
+      "status": "FAILED",
+      "error_message": "Deployment web-cross did not become ready: deployment web-cross did not become ready within 2m0s",
+      "details": [
+        "✓ Created nginx deployment 'web-cross' with 2 replicas"
+      ],
+      "start_time": "2025-07-03T08:31:54-07:00",
+      "end_time": "2025-07-03T08:33:54-07:00",
+      "execution_time_seconds": 120.018442292
+    },
+    {
+      "test_number": 4,
+      "test_name": "DNS Resolution",
+      "description": "Comprehensively validates Kubernetes DNS infrastructure including service discovery, FQDN resolution, and DNS search domains",
+      "status": "FAILED",
+      "error_message": "Deployment web-dns did not become ready: deployment web-dns did not become ready within 2m0s",
+      "details": [
+        "✓ Created nginx deployment 'web-dns' for DNS testing"
+      ],
+      "start_time": "2025-07-03T08:33:54-07:00",
+      "end_time": "2025-07-03T08:35:54-07:00",
+      "execution_time_seconds": 120.014668334
+    }
+  ],
+  "summary": {
+    "total_tests": 4,
+    "passed": 0,
+    "failed": 4,
+    "overall_status": "FAILED",
+    "total_execution_time_seconds": 480.236683625,
+    "errors_encountered": [
+      "Test 1 (Pod-to-Pod Connectivity): Pod netshoot-test-1 did not become ready: pod netshoot-test-1 did not become ready within 2m0s",
+      "Test 2 (Service to Pod Connectivity): Deployment web did not become ready: deployment web did not become ready within 2m0s",
+      "Test 3 (Cross-Node Service Connectivity): Deployment web-cross did not become ready: deployment web-cross did not become ready within 2m0s",
+      "Test 4 (DNS Resolution): Deployment web-dns did not become ready: deployment web-dns did not become ready within 2m0s"
+    ],
+    "completion_time": "2025-07-03T08:35:54-07:00"
+  }
+}

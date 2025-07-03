@@ -7,18 +7,49 @@ import (
 	"time"
 )
 
+// CommandOutputJSON represents a command execution result for JSON output
+type CommandOutputJSON struct {
+	Command     string `json:"command"`
+	ExitCode    int    `json:"exit_code"`
+	Stdout      string `json:"stdout"`
+	Stderr      string `json:"stderr,omitempty"`
+	Duration    string `json:"duration,omitempty"`
+	Description string `json:"description"`
+}
+
+// NetworkContextJSON represents network diagnostic information for JSON output
+type NetworkContextJSON struct {
+	SourcePodIP    string            `json:"source_pod_ip,omitempty"`
+	TargetPodIP    string            `json:"target_pod_ip,omitempty"`
+	ServiceIP      string            `json:"service_ip,omitempty"`
+	SourceNode     string            `json:"source_node,omitempty"`
+	TargetNode     string            `json:"target_node,omitempty"`
+	RoutingInfo    []string          `json:"routing_info,omitempty"`
+	AdditionalInfo map[string]string `json:"additional_info,omitempty"`
+}
+
+// DetailedDiagnosticsJSON represents comprehensive diagnostic information for JSON output
+type DetailedDiagnosticsJSON struct {
+	FailureStage         string              `json:"failure_stage,omitempty"`
+	TechnicalError       string              `json:"technical_error,omitempty"`
+	CommandOutputs       []CommandOutputJSON `json:"command_outputs,omitempty"`
+	NetworkContext       *NetworkContextJSON `json:"network_context,omitempty"`
+	TroubleshootingHints []string            `json:"troubleshooting_hints,omitempty"`
+}
+
 // TestResultJSON represents a single test result for JSON output
 type TestResultJSON struct {
-	TestNumber           int      `json:"test_number"`
-	TestName             string   `json:"test_name"`
-	Description          string   `json:"description"`
-	Status               string   `json:"status"`
-	SuccessMessage       string   `json:"success_message,omitempty"`
-	ErrorMessage         string   `json:"error_message,omitempty"`
-	Details              []string `json:"details"`
-	StartTime            string   `json:"start_time"`
-	EndTime              string   `json:"end_time"`
-	ExecutionTimeSeconds float64  `json:"execution_time_seconds"`
+	TestNumber           int                      `json:"test_number"`
+	TestName             string                   `json:"test_name"`
+	Description          string                   `json:"description"`
+	Status               string                   `json:"status"`
+	SuccessMessage       string                   `json:"success_message,omitempty"`
+	ErrorMessage         string                   `json:"error_message,omitempty"`
+	Details              []string                 `json:"details"`
+	DetailedDiagnostics  *DetailedDiagnosticsJSON `json:"detailed_diagnostics,omitempty"`
+	StartTime            string                   `json:"start_time"`
+	EndTime              string                   `json:"end_time"`
+	ExecutionTimeSeconds float64                  `json:"execution_time_seconds"`
 }
 
 // ExecutionInfoJSON represents execution metadata
@@ -130,17 +161,60 @@ func CreateJSONReport(
 		errorMessage := ""
 		var testDetails []string
 
+		// Convert DetailedDiagnostics to JSON format
+		var detailedDiagnosticsJSON *DetailedDiagnosticsJSON
+		if result.DetailedDiagnostics != nil {
+			// Convert CommandOutputs
+			var commandOutputsJSON []CommandOutputJSON
+			for _, cmd := range result.DetailedDiagnostics.CommandOutputs {
+				commandOutputsJSON = append(commandOutputsJSON, CommandOutputJSON{
+					Command:     cmd.Command,
+					ExitCode:    cmd.ExitCode,
+					Stdout:      cmd.Stdout,
+					Stderr:      cmd.Stderr,
+					Duration:    cmd.Duration,
+					Description: cmd.Description,
+				})
+			}
+
+			// Convert NetworkContext
+			var networkContextJSON *NetworkContextJSON
+			if result.DetailedDiagnostics.NetworkContext != nil {
+				networkContextJSON = &NetworkContextJSON{
+					SourcePodIP:    result.DetailedDiagnostics.NetworkContext.SourcePodIP,
+					TargetPodIP:    result.DetailedDiagnostics.NetworkContext.TargetPodIP,
+					ServiceIP:      result.DetailedDiagnostics.NetworkContext.ServiceIP,
+					SourceNode:     result.DetailedDiagnostics.NetworkContext.SourceNode,
+					TargetNode:     result.DetailedDiagnostics.NetworkContext.TargetNode,
+					RoutingInfo:    result.DetailedDiagnostics.NetworkContext.RoutingInfo,
+					AdditionalInfo: result.DetailedDiagnostics.NetworkContext.AdditionalInfo,
+				}
+			}
+
+			detailedDiagnosticsJSON = &DetailedDiagnosticsJSON{
+				FailureStage:         result.DetailedDiagnostics.FailureStage,
+				TechnicalError:       result.DetailedDiagnostics.TechnicalError,
+				CommandOutputs:       commandOutputsJSON,
+				NetworkContext:       networkContextJSON,
+				TroubleshootingHints: result.DetailedDiagnostics.TroubleshootingHints,
+			}
+		}
+
 		if result.Success {
 			status = "PASSED"
 			successMessage = result.Message
 			passedCount++
-			// For successful tests, only include minimal details or none
-			testDetails = []string{} // Empty details for successful tests
+			// For successful tests, include details if verbose mode is enabled
+			if verbose {
+				testDetails = result.Details
+			} else {
+				testDetails = []string{} // Empty details for successful tests in non-verbose mode
+			}
 		} else {
 			errorMessage = result.Message
 			errorsEncountered = append(errorsEncountered, fmt.Sprintf("Test %d (%s): %s", i+1, testName, result.Message))
 			failedCount++
-			// For failed tests, include full details for debugging
+			// For failed tests, always include full details for debugging
 			testDetails = result.Details
 		}
 
@@ -161,6 +235,7 @@ func CreateJSONReport(
 			SuccessMessage:       successMessage,
 			ErrorMessage:         errorMessage,
 			Details:              testDetails,
+			DetailedDiagnostics:  detailedDiagnosticsJSON,
 			StartTime:            result.StartTime.Format(time.RFC3339),
 			EndTime:              result.EndTime.Format(time.RFC3339),
 			ExecutionTimeSeconds: executionTime,
