@@ -40,11 +40,42 @@ func evaluateHTTPStatusCode(statusCode string) (bool, string) {
 	}
 }
 
+// CommandOutput represents a command execution result
+type CommandOutput struct {
+	Command     string `json:"command"`
+	ExitCode    int    `json:"exit_code"`
+	Stdout      string `json:"stdout"`
+	Stderr      string `json:"stderr,omitempty"`
+	Duration    string `json:"duration,omitempty"`
+	Description string `json:"description"`
+}
+
+// NetworkContext represents network diagnostic information
+type NetworkContext struct {
+	SourcePodIP    string            `json:"source_pod_ip,omitempty"`
+	TargetPodIP    string            `json:"target_pod_ip,omitempty"`
+	ServiceIP      string            `json:"service_ip,omitempty"`
+	SourceNode     string            `json:"source_node,omitempty"`
+	TargetNode     string            `json:"target_node,omitempty"`
+	RoutingInfo    []string          `json:"routing_info,omitempty"`
+	AdditionalInfo map[string]string `json:"additional_info,omitempty"`
+}
+
+// DetailedDiagnostics represents comprehensive diagnostic information
+type DetailedDiagnostics struct {
+	FailureStage         string          `json:"failure_stage,omitempty"`
+	TechnicalError       string          `json:"technical_error,omitempty"`
+	CommandOutputs       []CommandOutput `json:"command_outputs,omitempty"`
+	NetworkContext       *NetworkContext `json:"network_context,omitempty"`
+	TroubleshootingHints []string        `json:"troubleshooting_hints,omitempty"`
+}
+
 // TestResult represents the result of a connectivity test
 type TestResult struct {
-	Success bool
-	Message string
-	Details []string
+	Success             bool                 `json:"success"`
+	Message             string               `json:"message"`
+	Details             []string             `json:"details"`
+	DetailedDiagnostics *DetailedDiagnostics `json:"detailed_diagnostics,omitempty"`
 }
 
 // Tester handles connectivity testing operations
@@ -196,10 +227,43 @@ func (t *Tester) TestPodToPodConnectivity(ctx context.Context) TestResult {
 	if err != nil {
 		details = append(details, fmt.Sprintf("✗ Ping command failed: %v", err))
 		details = append(details, fmt.Sprintf("  Output: %s", pingResult))
+
+		// Create detailed diagnostics for ping failure
+		detailedDiagnostics := &DetailedDiagnostics{
+			FailureStage:   "connectivity_test",
+			TechnicalError: fmt.Sprintf("100%% packet loss during ping test: %v", err),
+			CommandOutputs: []CommandOutput{
+				{
+					Command:     fmt.Sprintf("ping -c 3 -W 3 -i 1 %s", pod2IP),
+					ExitCode:    1, // Ping failure exit code
+					Stdout:      pingResult,
+					Description: "Cross-node ping test from pod to pod",
+				},
+			},
+			NetworkContext: &NetworkContext{
+				SourceNode:  workerNodes[0],
+				TargetNode:  workerNodes[1],
+				TargetPodIP: pod2IP,
+				AdditionalInfo: map[string]string{
+					"pod_1_name": pod1Name,
+					"pod_2_name": pod2Name,
+					"test_type":  "cross_node_ping",
+				},
+			},
+			TroubleshootingHints: []string{
+				"Check CNI network configuration",
+				"Verify cross-node routing is enabled",
+				"Check firewall rules between nodes",
+				"Validate pod CIDR configuration",
+				"Ensure kube-proxy is running on all nodes",
+			},
+		}
+
 		return TestResult{
-			Success: false,
-			Message: fmt.Sprintf("Pod %s is not reachable from pod %s", pod2Name, pod1Name),
-			Details: details,
+			Success:             false,
+			Message:             fmt.Sprintf("Pod %s is not reachable from pod %s", pod2Name, pod1Name),
+			Details:             details,
+			DetailedDiagnostics: detailedDiagnostics,
 		}
 	}
 

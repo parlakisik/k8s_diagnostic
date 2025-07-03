@@ -1,0 +1,111 @@
+{
+  "execution_info": {
+    "timestamp": "2025-07-03T12:52:02-07:00",
+    "filename": "k8s-diagnostic-results-20250703-125336.json",
+    "namespace": "diagnostic-test",
+    "kubeconfig_source": "/tmp/eks-anywhere-kubeconfig.yaml",
+    "verbose_mode": true
+  },
+  "tests": [
+    {
+      "test_number": 1,
+      "test_name": "Pod-to-Pod Connectivity",
+      "description": "Validates direct pod communication across different worker nodes, testing CNI networking and inter-node communication",
+      "status": "FAILED",
+      "error_message": "Pod netshoot-test-2 is not reachable from pod netshoot-test-1",
+      "details": [
+        "✓ Found 2 worker nodes",
+        "✓ Created pod netshoot-test-1 on node mgmt-md-0-9nqt4-7h2qv",
+        "✓ Created pod netshoot-test-2 on node mgmt-md-0-9nqt4-nfsvp",
+        "✓ Pod netshoot-test-1 is ready",
+        "✓ Pod netshoot-test-2 is ready",
+        "✓ Pod netshoot-test-2 IP: 192.168.1.136",
+        "✓ Cleaned up test pods",
+        "✗ Ping command failed: command terminated with exit code 1",
+        "  Output: PING 192.168.1.136 (192.168.1.136) 56(84) bytes of data.\n\n--- 192.168.1.136 ping statistics ---\n3 packets transmitted, 0 received, 100% packet loss, time 2069ms\n\n"
+      ],
+      "start_time": "2025-07-03T12:52:02-07:00",
+      "end_time": "2025-07-03T12:52:12-07:00",
+      "execution_time_seconds": 9.152149625
+    },
+    {
+      "test_number": 2,
+      "test_name": "Service to Pod Connectivity",
+      "description": "Validates Kubernetes service discovery, HTTP connectivity, and load balancing across multiple pod replicas",
+      "status": "FAILED",
+      "error_message": "Service HTTP connectivity failed",
+      "details": [
+        "✓ Created nginx deployment 'web' with 2 replicas",
+        "✓ Deployment 'web' is ready",
+        "✓ Created service 'web'",
+        "✓ Service IP is 10.104.156.192 (kubectl get svc web -n diagnostic-test -o jsonpath='{.spec.clusterIP}')",
+        "✓ Created test pod 'netshoot-service-test'",
+        "✓ Test pod 'netshoot-service-test' is ready",
+        "WARNING: ICMP ping to service IP failed: command terminated with exit code 1 (some clusters block ping)",
+        "  Output: PING 10.104.156.192 (10.104.156.192) 56(84) bytes of data.\n\n--- 10.104.156.192 ping statistics ---\n3 packets transmitted, 0 received, 100% packet loss, time 2060ms",
+        "✗ HTTP connectivity failed: command terminated with exit code 6"
+      ],
+      "start_time": "2025-07-03T12:52:12-07:00",
+      "end_time": "2025-07-03T12:52:32-07:00",
+      "execution_time_seconds": 20.761811125
+    },
+    {
+      "test_number": 3,
+      "test_name": "Cross-Node Service Connectivity",
+      "description": "Validates kube-proxy inter-node routing by ensuring services work when accessed from pods on different nodes",
+      "status": "FAILED",
+      "error_message": "Cross-node service connectivity failed",
+      "details": [
+        "✓ Created nginx deployment 'web-cross' with 2 replicas",
+        "✓ Deployment 'web-cross' is ready",
+        "✓ Nginx pods running on nodes: [mgmt-md-0-9nqt4-7h2qv mgmt-md-0-9nqt4-nfsvp]",
+        "✓ Selected different node 'mgmt-md-0-9nqt4-7h2qv' for cross-node test",
+        "✓ Created service 'web-cross'",
+        "✓ Service IP is 10.107.46.121",
+        "✓ Created test pod 'netshoot-cross-node-test' on node 'mgmt-md-0-9nqt4-7h2qv'",
+        "✓ Test pod 'netshoot-cross-node-test' is ready on remote node",
+        "✗ Cross-node HTTP connectivity failed: command terminated with exit code 6"
+      ],
+      "start_time": "2025-07-03T12:52:32-07:00",
+      "end_time": "2025-07-03T12:52:47-07:00",
+      "execution_time_seconds": 14.824807542
+    },
+    {
+      "test_number": 4,
+      "test_name": "DNS Resolution",
+      "description": "Comprehensively validates Kubernetes DNS infrastructure including service discovery, FQDN resolution, and DNS search domains",
+      "status": "FAILED",
+      "error_message": "DNS resolution test failed - check cluster DNS configuration",
+      "details": [
+        "✓ Created nginx deployment 'web-dns' for DNS testing",
+        "✓ Deployment 'web-dns' is ready",
+        "✓ Created service 'web-dns' for DNS testing",
+        "✓ Created DNS test pod 'netshoot-dns-test'",
+        "✓ DNS test pod 'netshoot-dns-test' is ready",
+        "✗ Service FQDN DNS resolution failed: command terminated with exit code 1",
+        "  Command: nslookup web-dns.diagnostic-test.svc.cluster.local",
+        "✗ Short name DNS resolution failed: command terminated with exit code 1",
+        "  Command: nslookup web-dns",
+        "WARNING: Pod-to-pod DNS resolution test inconclusive: pod-to-pod DNS resolution failed",
+        "✓ Cleaned up DNS test resources"
+      ],
+      "start_time": "2025-07-03T12:52:47-07:00",
+      "end_time": "2025-07-03T12:53:36-07:00",
+      "execution_time_seconds": 49.232958333
+    }
+  ],
+  "summary": {
+    "total_tests": 4,
+    "passed": 0,
+    "failed": 4,
+    "overall_status": "FAILED",
+    "total_execution_time_seconds": 93.996406583,
+    "errors_encountered": [
+      "Test 1 (Pod-to-Pod Connectivity): Pod netshoot-test-2 is not reachable from pod netshoot-test-1",
+      "Test 2 (Service to Pod Connectivity): Service HTTP connectivity failed",
+      "Test 3 (Cross-Node Service Connectivity): Cross-node service connectivity failed",
+      "Test 4 (DNS Resolution): DNS resolution test failed - check cluster DNS configuration"
+    ],
+    "completion_time": "2025-07-03T12:53:36-07:00"
+  }
+}
