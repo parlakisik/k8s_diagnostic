@@ -70,6 +70,38 @@ type DetailedDiagnostics struct {
 	TroubleshootingHints []string        `json:"troubleshooting_hints,omitempty"`
 }
 
+// TestConfig represents configuration for test execution
+type TestConfig struct {
+	UseExistingPods bool   `json:"use_existing_pods"`
+	TargetNamespace string `json:"target_namespace"`
+	PodSelector     string `json:"pod_selector"`
+	CreateFreshPods bool   `json:"create_fresh_pods"`
+}
+
+// InteractiveConfig represents configuration for interactive pod selection
+type InteractiveConfig struct {
+	TargetNamespace   string `json:"target_namespace"`
+	AutoCreateMissing bool   `json:"auto_create_missing"`
+	PreferCrossNode   bool   `json:"prefer_cross_node"`
+	ShowAllPods       bool   `json:"show_all_pods"`
+	Verbose           bool   `json:"verbose"`
+}
+
+// PodInfo represents information about a discovered pod
+type PodInfo struct {
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	NodeName   string            `json:"node_name"`
+	PodIP      string            `json:"pod_ip"`
+	Status     string            `json:"status"`
+	Age        string            `json:"age"`
+	Image      string            `json:"image"`
+	Labels     map[string]string `json:"labels"`
+	IsNetshoot bool              `json:"is_netshoot"`
+	IsReady    bool              `json:"is_ready"`
+	Score      int               `json:"score"` // Health/suitability score
+}
+
 // TestResult represents the result of a connectivity test
 type TestResult struct {
 	Success             bool                 `json:"success"`
@@ -132,6 +164,167 @@ func (t *Tester) CleanupNamespace(ctx context.Context) error {
 
 // TestPodToPodConnectivity creates two netshoot pods and tests connectivity between them
 func (t *Tester) TestPodToPodConnectivity(ctx context.Context) TestResult {
+	return t.TestPodToPodConnectivityWithConfig(ctx, TestConfig{CreateFreshPods: true})
+}
+
+// TestPodToPodConnectivityWithConfig tests connectivity with configurable pod source
+func (t *Tester) TestPodToPodConnectivityWithConfig(ctx context.Context, config TestConfig) TestResult {
+	if config.UseExistingPods {
+		return t.testWithExistingPods(ctx, config)
+	}
+	return t.testWithFreshPods(ctx, config)
+}
+
+// testWithExistingPods tests connectivity using existing pods in the cluster
+func (t *Tester) testWithExistingPods(ctx context.Context, config TestConfig) TestResult {
+	var details []string
+
+	// Discover existing pods
+	existingPods, err := t.findExistingNetshootPods(ctx, config)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to discover existing pods: %v", err),
+			Details: details,
+			DetailedDiagnostics: &DetailedDiagnostics{
+				FailureStage:   "pod_discovery",
+				TechnicalError: fmt.Sprintf("Pod discovery failed in namespace '%s' with selector '%s': %v", config.TargetNamespace, config.PodSelector, err),
+				TroubleshootingHints: []string{
+					fmt.Sprintf("Ensure pods with label '%s' exist in namespace '%s'", config.PodSelector, config.TargetNamespace),
+					"Check if pods are in Ready state",
+					"Verify kubectl has access to the target namespace",
+				},
+			},
+		}
+	}
+
+	if len(existingPods) < 2 {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Found %d pods, need at least 2 for connectivity testing", len(existingPods)),
+			Details: details,
+			DetailedDiagnostics: &DetailedDiagnostics{
+				FailureStage:   "pod_validation",
+				TechnicalError: fmt.Sprintf("Insufficient pods: found %d, need at least 2", len(existingPods)),
+				NetworkContext: &NetworkContext{
+					AdditionalInfo: map[string]string{
+						"target_namespace": config.TargetNamespace,
+						"pod_selector":     config.PodSelector,
+						"pods_found":       fmt.Sprintf("%d", len(existingPods)),
+					},
+				},
+				TroubleshootingHints: []string{
+					fmt.Sprintf("Deploy at least 2 pods with label '%s' in namespace '%s'", config.PodSelector, config.TargetNamespace),
+					"Ensure pods are distributed across different nodes for cross-node testing",
+					"Check pod status with: kubectl get pods -n " + config.TargetNamespace,
+				},
+			},
+		}
+	}
+
+	details = append(details, fmt.Sprintf("✓ Using existing pods mode - found %d pods", len(existingPods)))
+
+	// Select two pods for testing (preferably on different nodes)
+	pod1, pod2, err := t.selectCrossNodePods(existingPods)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to select suitable pods: %v", err),
+			Details: details,
+			DetailedDiagnostics: &DetailedDiagnostics{
+				FailureStage:   "pod_selection",
+				TechnicalError: fmt.Sprintf("Pod selection failed: %v", err),
+				TroubleshootingHints: []string{
+					"Ensure pods are running on different nodes for cross-node testing",
+					"Check pod readiness status",
+					"Verify pods have valid IP addresses",
+				},
+			},
+		}
+	}
+
+	details = append(details, fmt.Sprintf("✓ Selected pod %s on node %s", pod1.Name, pod1.Spec.NodeName))
+	details = append(details, fmt.Sprintf("✓ Selected pod %s on node %s", pod2.Name, pod2.Spec.NodeName))
+
+	// Test connectivity by pinging from pod1 to pod2
+	pod2IP := pod2.Status.PodIP
+	if pod2IP == "" {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod %s has no IP address", pod2.Name),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Target pod %s IP: %s", pod2.Name, pod2IP))
+
+	// Ping from pod1 to pod2
+	pingResult, err := t.pingFromPodInNamespace(ctx, pod1.Name, config.TargetNamespace, pod2IP)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ Ping command failed: %v", err))
+		details = append(details, fmt.Sprintf("  Output: %s", pingResult))
+
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod %s is not reachable from pod %s", pod2.Name, pod1.Name),
+			Details: details,
+			DetailedDiagnostics: &DetailedDiagnostics{
+				FailureStage:   "connectivity_test",
+				TechnicalError: fmt.Sprintf("100%% packet loss during ping test: %v", err),
+				CommandOutputs: []CommandOutput{
+					{
+						Command:     fmt.Sprintf("ping -c 3 -W 3 -i 1 %s", pod2IP),
+						ExitCode:    1,
+						Stdout:      pingResult,
+						Description: "Cross-node ping test between existing pods",
+					},
+				},
+				NetworkContext: &NetworkContext{
+					SourceNode:  pod1.Spec.NodeName,
+					TargetNode:  pod2.Spec.NodeName,
+					TargetPodIP: pod2IP,
+					AdditionalInfo: map[string]string{
+						"source_pod":       pod1.Name,
+						"target_pod":       pod2.Name,
+						"test_mode":        "existing_pods",
+						"target_namespace": config.TargetNamespace,
+					},
+				},
+				TroubleshootingHints: []string{
+					"Check if pod was deleted during test execution",
+					"Verify CNI network configuration",
+					"Check firewall rules between nodes",
+					"Ensure kube-proxy is running on all nodes",
+				},
+			},
+		}
+	}
+
+	// Check for successful ping patterns
+	pingLower := strings.ToLower(pingResult)
+	if strings.Contains(pingLower, "0% packet loss") ||
+		(strings.Contains(pingLower, "3 packets transmitted") && strings.Contains(pingLower, "3 received")) ||
+		(strings.Contains(pingLower, "transmitted") && strings.Contains(pingLower, "received") && !strings.Contains(pingLower, "100% packet loss")) {
+
+		details = append(details, "✓ Ping successful - existing pods can communicate")
+		details = append(details, fmt.Sprintf("  Ping output: %s", strings.TrimSpace(pingResult)))
+		return TestResult{
+			Success: true,
+			Message: fmt.Sprintf("Pod %s is reachable from pod %s (using existing pods)", pod2.Name, pod1.Name),
+			Details: details,
+		}
+	} else {
+		details = append(details, fmt.Sprintf("✗ Ping failed - pod %s is not reachable from pod %s", pod2.Name, pod1.Name))
+		details = append(details, fmt.Sprintf("  Ping output: %s", strings.TrimSpace(pingResult)))
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod %s is not reachable from pod %s (using existing pods)", pod2.Name, pod1.Name),
+			Details: details,
+		}
+	}
+}
+
+// testWithFreshPods tests connectivity using newly created pods (current logic)
+func (t *Tester) testWithFreshPods(ctx context.Context, config TestConfig) TestResult {
 	var details []string
 
 	// Get worker nodes
@@ -892,6 +1085,332 @@ func (t *Tester) pingFromPod(ctx context.Context, fromPod, targetIP string) (str
 	return output, nil
 }
 
+// InteractivePodSelection handles interactive pod discovery and selection
+func (t *Tester) InteractivePodSelection(ctx context.Context, config InteractiveConfig) (TestConfig, error) {
+	fmt.Printf("Discovering pods in namespace '%s'...\n", config.TargetNamespace)
+
+	// Discover all pods in the target namespace
+	allPods, err := t.clientset.CoreV1().Pods(config.TargetNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return TestConfig{}, fmt.Errorf("failed to list pods in namespace %s: %v", config.TargetNamespace, err)
+	}
+
+	if len(allPods.Items) == 0 {
+		fmt.Printf("No pods found in namespace '%s'\n", config.TargetNamespace)
+		if config.AutoCreateMissing {
+			fmt.Printf("Auto-creating pods enabled. Will create fresh pods for testing.\n")
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+
+		fmt.Printf("Would you like to create fresh pods for testing? (y/n): ")
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+		return TestConfig{}, fmt.Errorf("no pods available for testing")
+	}
+
+	// Convert pods to PodInfo and score them
+	var podInfos []PodInfo
+	for _, pod := range allPods.Items {
+		podInfo := t.convertToPodInfo(&pod)
+		if config.ShowAllPods || podInfo.IsNetshoot || t.isNetworkCapable(&pod) {
+			podInfos = append(podInfos, podInfo)
+		}
+	}
+
+	if len(podInfos) == 0 {
+		fmt.Printf("No suitable pods found for network testing in namespace '%s'\n", config.TargetNamespace)
+		if config.AutoCreateMissing {
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+
+		fmt.Printf("Would you like to create fresh pods for testing? (y/n): ")
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+		return TestConfig{}, fmt.Errorf("no suitable pods available for testing")
+	}
+
+	// Sort pods by score (highest first)
+	t.sortPodsByScore(podInfos, config.PreferCrossNode)
+
+	// Display discovered pods
+	fmt.Printf("\n📋 Discovered Pods:\n")
+	for i, pod := range podInfos {
+		status := "❌"
+		if pod.IsReady {
+			status = "✅"
+		}
+
+		nodeInfo := ""
+		if pod.NodeName != "" {
+			nodeInfo = fmt.Sprintf(" on %s", pod.NodeName)
+		}
+
+		suitability := ""
+		if pod.IsNetshoot {
+			suitability = " 🔧 netshoot"
+		} else if pod.Score > 5 {
+			suitability = " 🌐 network-capable"
+		}
+
+		fmt.Printf("[%d] %s %s (%s)%s - IP: %s%s\n",
+			i+1, status, pod.Name, pod.Status, nodeInfo, pod.PodIP, suitability)
+	}
+
+	if len(podInfos) >= 2 {
+		fmt.Printf("\n💡 Recommendation: Pods %d and %d for cross-node testing\n", 1, 2)
+	}
+
+	// Handle selection
+	if len(podInfos) < 2 {
+		fmt.Printf("\n⚠️  Found only %d suitable pod(s), need at least 2 for connectivity testing\n", len(podInfos))
+		if config.AutoCreateMissing {
+			fmt.Printf("Auto-creating additional pods...\n")
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+
+		fmt.Printf("Would you like to create additional pods? (y/n): ")
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) == "y" || strings.ToLower(response) == "yes" {
+			return TestConfig{
+				UseExistingPods: false,
+				CreateFreshPods: true,
+			}, nil
+		}
+		return TestConfig{}, fmt.Errorf("insufficient pods for testing")
+	}
+
+	fmt.Printf("\nSelect pods for testing (e.g., 1,2 or just press Enter for recommended): ")
+	var input string
+	fmt.Scanln(&input)
+
+	var selectedIndices []int
+	if input == "" {
+		// Use recommended pods (first two, which are highest scored)
+		selectedIndices = []int{0, 1}
+	} else {
+		// Parse user input
+		parts := strings.Split(input, ",")
+		for _, part := range parts {
+			index, err := strconv.Atoi(strings.TrimSpace(part))
+			if err != nil || index < 1 || index > len(podInfos) {
+				return TestConfig{}, fmt.Errorf("invalid selection: %s", part)
+			}
+			selectedIndices = append(selectedIndices, index-1) // Convert to 0-based
+		}
+	}
+
+	if len(selectedIndices) < 2 {
+		return TestConfig{}, fmt.Errorf("need to select at least 2 pods")
+	}
+
+	// Create selector for the chosen pods
+	selectedPods := make([]PodInfo, len(selectedIndices))
+	for i, idx := range selectedIndices {
+		selectedPods[i] = podInfos[idx]
+	}
+
+	// Generate a selector that matches the selected pods
+	selector := t.generatePodSelector(selectedPods)
+
+	return TestConfig{
+		UseExistingPods: true,
+		TargetNamespace: config.TargetNamespace,
+		PodSelector:     selector,
+		CreateFreshPods: false,
+	}, nil
+}
+
+// convertToPodInfo converts a Kubernetes Pod to PodInfo with scoring
+func (t *Tester) convertToPodInfo(pod *corev1.Pod) PodInfo {
+	age := time.Since(pod.CreationTimestamp.Time).Truncate(time.Second).String()
+
+	// Determine primary image
+	image := "unknown"
+	if len(pod.Spec.Containers) > 0 {
+		image = pod.Spec.Containers[0].Image
+	}
+
+	// Check if it's a netshoot pod
+	isNetshoot := strings.Contains(strings.ToLower(image), "netshoot")
+
+	// Calculate suitability score
+	score := t.calculatePodScore(pod, isNetshoot)
+
+	return PodInfo{
+		Name:       pod.Name,
+		Namespace:  pod.Namespace,
+		NodeName:   pod.Spec.NodeName,
+		PodIP:      pod.Status.PodIP,
+		Status:     string(pod.Status.Phase),
+		Age:        age,
+		Image:      image,
+		Labels:     pod.Labels,
+		IsNetshoot: isNetshoot,
+		IsReady:    t.isPodReady(pod),
+		Score:      score,
+	}
+}
+
+// calculatePodScore assigns a suitability score to a pod for network testing
+func (t *Tester) calculatePodScore(pod *corev1.Pod, isNetshoot bool) int {
+	score := 0
+
+	// Base score for ready pods
+	if t.isPodReady(pod) {
+		score += 10
+	}
+
+	// High score for netshoot pods
+	if isNetshoot {
+		score += 20
+	}
+
+	// Score for network-capable images
+	image := strings.ToLower(pod.Spec.Containers[0].Image)
+	networkImages := []string{"busybox", "alpine", "ubuntu", "centos", "debian", "curl", "wget"}
+	for _, netImg := range networkImages {
+		if strings.Contains(image, netImg) {
+			score += 5
+			break
+		}
+	}
+
+	// Bonus for having network tools
+	if len(pod.Spec.Containers) > 0 {
+		container := pod.Spec.Containers[0]
+		if len(container.Command) > 0 {
+			cmdStr := strings.ToLower(strings.Join(container.Command, " "))
+			if strings.Contains(cmdStr, "sleep") || strings.Contains(cmdStr, "sh") || strings.Contains(cmdStr, "/bin/bash") {
+				score += 3
+			}
+		}
+	}
+
+	return score
+}
+
+// isNetworkCapable checks if a pod is likely to have network debugging capabilities
+func (t *Tester) isNetworkCapable(pod *corev1.Pod) bool {
+	if len(pod.Spec.Containers) == 0 {
+		return false
+	}
+
+	image := strings.ToLower(pod.Spec.Containers[0].Image)
+	networkCapableImages := []string{
+		"netshoot", "busybox", "alpine", "ubuntu", "centos", "debian",
+		"curl", "wget", "nicolaka/netshoot", "praqma/network-multitool",
+	}
+
+	for _, capable := range networkCapableImages {
+		if strings.Contains(image, capable) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// sortPodsByScore sorts pods by their suitability score
+func (t *Tester) sortPodsByScore(pods []PodInfo, preferCrossNode bool) {
+	// Simple bubble sort by score (descending)
+	for i := 0; i < len(pods)-1; i++ {
+		for j := 0; j < len(pods)-i-1; j++ {
+			// Higher score should come first
+			if pods[j].Score < pods[j+1].Score {
+				pods[j], pods[j+1] = pods[j+1], pods[j]
+			}
+		}
+	}
+
+	// If preferCrossNode, try to put cross-node pairs at the front
+	if preferCrossNode && len(pods) >= 2 {
+		for i := 0; i < len(pods)-1; i++ {
+			for j := i + 1; j < len(pods); j++ {
+				if pods[i].NodeName != "" && pods[j].NodeName != "" &&
+					pods[i].NodeName != pods[j].NodeName {
+					// Found a cross-node pair, move to front if not already there
+					if i > 0 {
+						// Move pods[i] to front
+						temp := pods[i]
+						copy(pods[1:i+1], pods[0:i])
+						pods[0] = temp
+					}
+					if j > 1 {
+						// Move pods[j] to second position
+						temp := pods[j]
+						copy(pods[2:j+1], pods[1:j])
+						pods[1] = temp
+					}
+					return
+				}
+			}
+		}
+	}
+}
+
+// generatePodSelector creates a label selector that matches the selected pods
+func (t *Tester) generatePodSelector(pods []PodInfo) string {
+	if len(pods) == 0 {
+		return ""
+	}
+
+	// Try to find a common label among all selected pods
+	commonLabels := make(map[string]string)
+
+	// Initialize with first pod's labels
+	for k, v := range pods[0].Labels {
+		commonLabels[k] = v
+	}
+
+	// Remove labels that don't match across all pods
+	for _, pod := range pods[1:] {
+		for k, v := range commonLabels {
+			if podVal, exists := pod.Labels[k]; !exists || podVal != v {
+				delete(commonLabels, k)
+			}
+		}
+	}
+
+	// Use the first common label we find
+	for k, v := range commonLabels {
+		// Skip kubernetes system labels
+		if !strings.HasPrefix(k, "kubernetes.io/") && !strings.HasPrefix(k, "k8s.io/") {
+			return fmt.Sprintf("%s=%s", k, v)
+		}
+	}
+
+	// Fallback: create a selector based on pod names (this is a hack but works for demonstration)
+	var names []string
+	for _, pod := range pods {
+		names = append(names, pod.Name)
+	}
+
+	// Return a pseudo-selector (this won't actually work in practice, but shows the concept)
+	return fmt.Sprintf("pod-name in (%s)", strings.Join(names, ","))
+}
+
 // cleanupPod removes a single pod
 func (t *Tester) cleanupPod(ctx context.Context, podName string) {
 	t.clientset.CoreV1().Pods(t.namespace).Delete(ctx, podName, metav1.DeleteOptions{})
@@ -1376,4 +1895,104 @@ func (t *Tester) cleanupServiceResources(ctx context.Context, deploymentName, se
 	if podName != "" {
 		t.clientset.CoreV1().Pods(t.namespace).Delete(ctx, podName, metav1.DeleteOptions{})
 	}
+}
+
+// findExistingNetshootPods discovers existing pods matching the selector in the target namespace
+func (t *Tester) findExistingNetshootPods(ctx context.Context, config TestConfig) ([]corev1.Pod, error) {
+	// List pods in the target namespace with the specified selector
+	pods, err := t.clientset.CoreV1().Pods(config.TargetNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: config.PodSelector,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods in namespace %s: %v", config.TargetNamespace, err)
+	}
+
+	var readyPods []corev1.Pod
+	for _, pod := range pods.Items {
+		// Only include ready pods
+		if t.isPodReady(&pod) {
+			readyPods = append(readyPods, pod)
+		}
+	}
+
+	return readyPods, nil
+}
+
+// selectCrossNodePods selects two pods preferably on different nodes for cross-node testing
+func (t *Tester) selectCrossNodePods(pods []corev1.Pod) (*corev1.Pod, *corev1.Pod, error) {
+	if len(pods) < 2 {
+		return nil, nil, fmt.Errorf("need at least 2 pods, found %d", len(pods))
+	}
+
+	// First, try to find pods on different nodes
+	for i, pod1 := range pods {
+		for j, pod2 := range pods {
+			if i != j && pod1.Spec.NodeName != pod2.Spec.NodeName && pod1.Spec.NodeName != "" && pod2.Spec.NodeName != "" {
+				return &pod1, &pod2, nil
+			}
+		}
+	}
+
+	// If no cross-node pairs found, use the first two pods
+	if len(pods) >= 2 {
+		return &pods[0], &pods[1], nil
+	}
+
+	return nil, nil, fmt.Errorf("insufficient pods for testing")
+}
+
+// isPodReady checks if a pod is in Ready state
+func (t *Tester) isPodReady(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// pingFromPodInNamespace executes ping command from a pod in a specific namespace
+func (t *Tester) pingFromPodInNamespace(ctx context.Context, fromPod, namespace, targetIP string) (string, error) {
+	// Create the exec request
+	req := t.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(fromPod).
+		Namespace(namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Container: "netshoot",
+		Command:   []string{"ping", "-c", "3", "-W", "3", "-i", "1", targetIP},
+		Stdout:    true,
+		Stderr:    true,
+	}, scheme.ParameterCodec)
+
+	// Create the executor
+	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	// Prepare buffers for output
+	var stdout, stderr bytes.Buffer
+
+	// Execute the command
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	output := stdout.String()
+	if err != nil {
+		if stderr.Len() > 0 {
+			return output + "\nSTDERR: " + stderr.String(), err
+		}
+		return output, err
+	}
+
+	return output, nil
 }

@@ -31,19 +31,56 @@ All test resources will be created in the specified namespace (default: diagnost
 		useExistingPods, _ := cmd.Flags().GetBool("use-existing-pods")
 		targetNamespace, _ := cmd.Flags().GetString("target-namespace")
 		podSelector, _ := cmd.Flags().GetString("pod-selector")
+		interactive, _ := cmd.Flags().GetBool("interactive")
+		autoCreateMissing, _ := cmd.Flags().GetBool("auto-create-missing")
+		preferCrossNode, _ := cmd.Flags().GetBool("prefer-cross-node")
+		showAllPods, _ := cmd.Flags().GetBool("show-all-pods")
 
-		// Create test configuration
-		_ = diagnostic.TestConfig{
-			UseExistingPods: useExistingPods,
-			TargetNamespace: targetNamespace,
-			PodSelector:     podSelector,
-			CreateFreshPods: !useExistingPods,
+		// Create tester early for interactive mode
+		ctx := context.Background()
+		tester, err := diagnostic.NewTester(kubeconfig, namespace)
+		if err != nil {
+			fmt.Printf("ERROR: Failed to create diagnostic tester: %v\n", err)
+			return
 		}
 
-		// TODO: Implement existing pods functionality
-		// For now, display configuration if using existing pods mode
-		if useExistingPods {
-			fmt.Printf("NOTE: Using existing pods mode - target namespace: %s, selector: %s\n", targetNamespace, podSelector)
+		// Handle interactive pod selection mode
+		if interactive {
+			fmt.Printf("🔍 Interactive Pod Discovery Mode\n\n")
+
+			interactiveConfig := diagnostic.InteractiveConfig{
+				TargetNamespace:   targetNamespace,
+				AutoCreateMissing: autoCreateMissing,
+				PreferCrossNode:   preferCrossNode,
+				ShowAllPods:       showAllPods,
+				Verbose:           verbose,
+			}
+
+			selectedConfig, err := tester.InteractivePodSelection(ctx, interactiveConfig)
+			if err != nil {
+				fmt.Printf("ERROR: Interactive pod selection failed: %v\n", err)
+				return
+			}
+
+			// Override test configuration with interactive selection
+			useExistingPods = selectedConfig.UseExistingPods
+			targetNamespace = selectedConfig.TargetNamespace
+			podSelector = selectedConfig.PodSelector
+
+			fmt.Printf("\n📋 Selected Configuration:\n")
+			if selectedConfig.UseExistingPods {
+				fmt.Printf("  - Mode: Using existing pods\n")
+				fmt.Printf("  - Target namespace: %s\n", targetNamespace)
+				fmt.Printf("  - Pod selector: %s\n", podSelector)
+			} else {
+				fmt.Printf("  - Mode: Creating fresh pods\n")
+			}
+			fmt.Printf("\n")
+		} else {
+			// Display configuration if using existing pods mode
+			if useExistingPods {
+				fmt.Printf("NOTE: Using existing pods mode - target namespace: %s, selector: %s\n", targetNamespace, podSelector)
+			}
 		}
 
 		// Record overall start time
@@ -62,15 +99,6 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		fmt.Printf("Running connectivity diagnostic tests in namespace '%s'\n\n", namespace)
 
-		// Create tester with default context (no timeout)
-		ctx := context.Background()
-
-		tester, err := diagnostic.NewTester(kubeconfig, namespace)
-		if err != nil {
-			fmt.Printf("ERROR: Failed to create diagnostic tester: %v\n", err)
-			return
-		}
-
 		// Create namespace before running tests
 		fmt.Printf("Setting up test environment...\n")
 		if err := tester.EnsureNamespace(ctx); err != nil {
@@ -87,7 +115,14 @@ All test resources will be created in the specified namespace (default: diagnost
 		var testNames []string
 
 		// Execute all tests with timing
-		executeTimedTest(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivity, ctx, verbose, &timedResults, &testNames)
+		testConfig := diagnostic.TestConfig{
+			UseExistingPods: useExistingPods,
+			TargetNamespace: targetNamespace,
+			PodSelector:     podSelector,
+			CreateFreshPods: !useExistingPods,
+		}
+
+		executeTimedTestWithConfig(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivityWithConfig, ctx, verbose, testConfig, &timedResults, &testNames)
 		executeTimedTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &timedResults, &testNames)
 		executeTimedTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &timedResults, &testNames)
 		executeTimedTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &timedResults, &testNames)
@@ -224,6 +259,48 @@ All test resources will be created in the specified namespace (default: diagnost
 	},
 }
 
+// executeTimedTestWithConfig is a helper function that captures timing information for tests that need configuration
+func executeTimedTestWithConfig(testNum int, testName string, testFunc func(context.Context, diagnostic.TestConfig) diagnostic.TestResult,
+	ctx context.Context, verbose bool, config diagnostic.TestConfig, timedResults *[]diagnostic.TimedTestResult, testNames *[]string) {
+
+	fmt.Printf("Test %d: %s\n", testNum, testName)
+
+	// Capture start time
+	startTime := time.Now()
+
+	// Execute test with config
+	result := testFunc(ctx, config)
+
+	// Capture end time
+	endTime := time.Now()
+
+	// Create timed result
+	timedResult := diagnostic.TimedTestResult{
+		TestResult: result,
+		StartTime:  startTime,
+		EndTime:    endTime,
+	}
+
+	*timedResults = append(*timedResults, timedResult)
+	*testNames = append(*testNames, testName)
+
+	// Display result
+	if result.Success {
+		fmt.Printf("✓ Test %d PASSED: %s\n", testNum, result.Message)
+	} else {
+		fmt.Printf("✗ Test %d FAILED: %s\n", testNum, result.Message)
+	}
+
+	// Show verbose details if enabled
+	if verbose && len(result.Details) > 0 {
+		fmt.Printf("  Details:\n")
+		for _, detail := range result.Details {
+			fmt.Printf("    %s\n", detail)
+		}
+	}
+	fmt.Printf("\n")
+}
+
 // executeTimedTest is a helper function that captures timing information for each test
 func executeTimedTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
 	ctx context.Context, verbose bool, timedResults *[]diagnostic.TimedTestResult, testNames *[]string) {
@@ -275,4 +352,8 @@ func init() {
 	testCmd.Flags().Bool("use-existing-pods", false, "test existing pods instead of creating new ones")
 	testCmd.Flags().String("target-namespace", "default", "namespace to search for existing pods (when using --use-existing-pods)")
 	testCmd.Flags().String("pod-selector", "app=netshoot", "label selector for finding existing pods")
+	testCmd.Flags().Bool("interactive", false, "enable interactive pod discovery and selection")
+	testCmd.Flags().Bool("auto-create-missing", false, "automatically create pods if insufficient for testing")
+	testCmd.Flags().Bool("prefer-cross-node", true, "prioritize pods on different nodes for cross-node testing")
+	testCmd.Flags().Bool("show-all-pods", false, "include non-netshoot pods in discovery (default: only network-capable pods)")
 }
