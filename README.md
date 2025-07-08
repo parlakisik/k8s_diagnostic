@@ -2,6 +2,41 @@
 
 A CLI tool for testing network connectivity within Kubernetes clusters using real pod-to-pod communication tests.
 
+## **Main Branch - Core Foundation**
+
+This is the **main/base branch** containing the foundational 4 connectivity tests that form the core of k8s-diagnostic. This branch provides reliable, battle-tested network diagnostics for any Kubernetes cluster.
+
+### **Available Feature Branches:**
+
+Explore enhanced versions with specialized capabilities:
+
+- **[feature/nodeport-loadbalancer-service-tests](../../tree/feature/nodeport-loadbalancer-service-tests)** - **FLAGSHIP** 
+  - ✓ External service testing (NodePort/LoadBalancer)
+  - ✓ 5 total tests (adds external access validation)
+  - ✓ Production-grade service exposure testing
+
+- **[feature/existing-pods-support](../../tree/feature/existing-pods-support)**
+  - ✓ Interactive pod discovery and selection
+  - ✓ Test existing workloads instead of creating new pods
+  - ✓ Production-safe testing with zero additional resources
+
+- **[feature/same-node-pod-placement](../../tree/feature/same-node-pod-placement)**
+  - ✓ Advanced pod placement control (same-node/cross-node/both)
+  - ✓ Performance comparison and targeted testing
+  - ✓ Network topology validation
+
+- **[feat/service-connectivity-tests](../../tree/feat/service-connectivity-tests)**
+  - ✓ Enhanced UI with clean visual indicators
+  - ✓ Professional presentation for demos and training
+  - ✓ Screenshot-ready output
+
+### **Core Features (This Branch):**
+- **4 Comprehensive Tests**: Pod-to-Pod, Service-to-Pod, Cross-Node Service, DNS Resolution
+- **Production Ready**: Stable, reliable connectivity testing
+- **Educational Output**: Detailed explanations and equivalent kubectl commands
+- **JSON Reporting**: Structured results for automation and monitoring
+- **Clean Architecture**: Well-organized, maintainable codebase
+
 ## Overview
 
 This project provides:
