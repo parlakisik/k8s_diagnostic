@@ -711,9 +711,9 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 
 	// Step 4: Test service FQDN resolution
 	fqdnName := fmt.Sprintf("%s.%s.svc.cluster.local", serviceName, t.namespace)
-	fqdnResult, err := t.testDNSResolution(ctx, testPodName, fqdnName)
-	if err != nil {
-		details = append(details, fmt.Sprintf("✗ Service FQDN DNS resolution failed: %v", err))
+	fqdnResult, fqdnErr := t.testDNSResolution(ctx, testPodName, fqdnName)
+	if fqdnErr != nil {
+		details = append(details, fmt.Sprintf("✗ Service FQDN DNS resolution failed: %v", fqdnErr))
 		details = append(details, fmt.Sprintf("  Command: nslookup %s", fqdnName))
 	} else {
 		details = append(details, fmt.Sprintf("✓ Service FQDN DNS resolution successful"))
@@ -722,9 +722,9 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 	}
 
 	// Step 5: Test short name resolution (DNS search domains)
-	shortResult, err := t.testDNSResolution(ctx, testPodName, serviceName)
-	if err != nil {
-		details = append(details, fmt.Sprintf("✗ Short name DNS resolution failed: %v", err))
+	shortResult, shortErr := t.testDNSResolution(ctx, testPodName, serviceName)
+	if shortErr != nil {
+		details = append(details, fmt.Sprintf("✗ Short name DNS resolution failed: %v", shortErr))
 		details = append(details, fmt.Sprintf("  Command: nslookup %s", serviceName))
 	} else {
 		details = append(details, fmt.Sprintf("✓ Short name DNS resolution successful"))
@@ -733,9 +733,9 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 	}
 
 	// Step 6: Test pod-to-pod DNS resolution
-	podDNSResult, err := t.testPodToPodDNS(ctx, testPodName, deploymentName)
-	if err != nil {
-		details = append(details, fmt.Sprintf("WARNING: Pod-to-pod DNS resolution test inconclusive: %v", err))
+	podDNSResult, podErr := t.testPodToPodDNS(ctx, testPodName, deploymentName)
+	if podErr != nil {
+		details = append(details, fmt.Sprintf("WARNING: Pod-to-pod DNS resolution test inconclusive: %v", podErr))
 	} else {
 		details = append(details, fmt.Sprintf("✓ Pod-to-pod DNS resolution successful"))
 		details = append(details, fmt.Sprintf("  %s", podDNSResult))
@@ -745,9 +745,9 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
 	details = append(details, "✓ Cleaned up DNS test resources")
 
-	// Determine overall success
-	fqdnSuccess := err == nil
-	shortSuccess := shortResult != ""
+	// Determine overall success (fixed logic)
+	fqdnSuccess := fqdnErr == nil
+	shortSuccess := shortErr == nil && shortResult != ""
 
 	if fqdnSuccess && shortSuccess {
 		return TestResult{
