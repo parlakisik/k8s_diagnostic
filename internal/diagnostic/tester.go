@@ -545,7 +545,7 @@ func (t *Tester) testBothPlacements(ctx context.Context, config TestConfig) Test
 	}
 }
 
-// testPodConnectivity tests both ping and HTTP connectivity between two pods
+// testPodConnectivity tests ICMP ping connectivity between two pods
 func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string, toPodObj *corev1.Pod, placement string, details *[]string) TestResult {
 	// Get target pod IP
 	pod2IP := toPodObj.Status.PodIP
@@ -562,54 +562,53 @@ func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string,
 	}
 	*details = append(*details, fmt.Sprintf("✓ Pod %s IP: %s", toPod, pod2IP))
 
-	// Test 1: ICMP ping connectivity
+	// Test ICMP ping connectivity (gold standard for network connectivity)
 	pingResult, pingErr := t.pingFromPod(ctx, fromPod, pod2IP)
 	var pingLatency float64
 
 	if pingErr != nil {
-		*details = append(*details, fmt.Sprintf("WARNING: ICMP ping failed: %v", pingErr))
+		*details = append(*details, fmt.Sprintf("✗ ICMP ping failed: %v", pingErr))
 		*details = append(*details, fmt.Sprintf("  Output: %s", pingResult))
-	} else {
-		// Extract latency from ping result
-		pingLatency = t.extractPingLatency(pingResult)
-
-		// Check for successful ping patterns
-		pingLower := strings.ToLower(pingResult)
-		if strings.Contains(pingLower, "0% packet loss") ||
-			(strings.Contains(pingLower, "3 packets transmitted") && strings.Contains(pingLower, "3 received")) {
-			*details = append(*details, fmt.Sprintf("✓ ICMP ping successful (%.2fms avg latency)", pingLatency))
-		} else {
-			*details = append(*details, fmt.Sprintf("WARNING: ICMP ping unreliable: %s", strings.TrimSpace(pingResult)))
-		}
-	}
-
-	// Test 2: HTTP connectivity using netshoot's Python HTTP server
-	httpResult := t.testHTTPConnectivityBetweenPods(ctx, fromPod, toPod, pod2IP, details)
-	if !httpResult.Success {
 		return TestResult{
 			Success: false,
-			Message: fmt.Sprintf("Pod connectivity test failed (%s): %s", placement, httpResult.Message),
+			Message: fmt.Sprintf("Pod connectivity test failed (%s) - ping failed", placement),
 		}
 	}
 
-	// Both tests successful
-	successMsg := fmt.Sprintf("Pod connectivity test passed (%s)", placement)
-	if pingLatency > 0 {
-		successMsg += fmt.Sprintf(" - avg latency: %.2fms", pingLatency)
-	}
+	// Extract latency from ping result
+	pingLatency = t.extractPingLatency(pingResult)
 
-	return TestResult{
-		Success: true,
-		Message: successMsg,
+	// Check for successful ping patterns
+	pingLower := strings.ToLower(pingResult)
+	if strings.Contains(pingLower, "0% packet loss") ||
+		(strings.Contains(pingLower, "3 packets transmitted") && strings.Contains(pingLower, "3 received")) {
+		*details = append(*details, fmt.Sprintf("✓ ICMP ping successful (%.2fms avg latency)", pingLatency))
+
+		// ICMP ping success confirms pod-to-pod connectivity
+		successMsg := fmt.Sprintf("Pod connectivity test passed (%s)", placement)
+		if pingLatency > 0 {
+			successMsg += fmt.Sprintf(" - avg latency: %.2fms", pingLatency)
+		}
+
+		return TestResult{
+			Success: true,
+			Message: successMsg,
+		}
+	} else {
+		*details = append(*details, fmt.Sprintf("✗ ICMP ping failed: %s", strings.TrimSpace(pingResult)))
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod connectivity test failed (%s) - unreliable ping", placement),
+		}
 	}
 }
 
 // testHTTPConnectivityBetweenPods tests HTTP connectivity by starting a web server in one pod and curling from another
 func (t *Tester) testHTTPConnectivityBetweenPods(ctx context.Context, fromPod, toPod, toPodIP string, details *[]string) TestResult {
-	// Start a simple HTTP server in the target pod using netshoot's Python
-	serverCmd := []string{"python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"}
+	// Use netcat to create a simple HTTP server (more reliable than Python in netshoot)
+	serverCmd := []string{"sh", "-c", "while true; do echo -e 'HTTP/1.1 200 OK\\r\\nContent-Length: 13\\r\\n\\r\\nHello World!\\n' | nc -l -p 8080; done"}
 
-	// Start HTTP server in background (this will run until pod is deleted)
+	// Start HTTP server in background
 	err := t.execCommandInPodAsync(ctx, toPod, serverCmd)
 	if err != nil {
 		*details = append(*details, fmt.Sprintf("WARNING: Failed to start HTTP server in pod %s: %v", toPod, err))
@@ -618,12 +617,27 @@ func (t *Tester) testHTTPConnectivityBetweenPods(ctx context.Context, fromPod, t
 
 	*details = append(*details, fmt.Sprintf("✓ Started HTTP server in pod %s on port 8080", toPod))
 
-	// Wait a moment for server to start
-	time.Sleep(2 * time.Second)
+	// Wait for server to start accepting connections
+	time.Sleep(3 * time.Second)
+
+	// Verify server is listening by checking from within the server pod
+	serverCheckCmd := []string{"sh", "-c", "timeout 5 nc -z localhost 8080"}
+	_, err = t.execCommandInPod(ctx, toPod, serverCheckCmd)
+	if err != nil {
+		*details = append(*details, fmt.Sprintf("WARNING: HTTP server not listening on localhost:8080 in pod %s: %v", toPod, err))
+		// Wait a bit more and try again
+		time.Sleep(2 * time.Second)
+		_, err = t.execCommandInPod(ctx, toPod, serverCheckCmd)
+		if err != nil {
+			*details = append(*details, fmt.Sprintf("✗ HTTP server failed to start properly in pod %s", toPod))
+			return TestResult{Success: false, Message: "HTTP server startup verification failed"}
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ HTTP server verified listening on port 8080"))
 
 	// Test HTTP connectivity from the source pod
-	curlCmd := []string{"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", fmt.Sprintf("http://%s:8080", toPodIP)}
-	statusCode, err := t.execCommandInPod(ctx, fromPod, curlCmd)
+	curlCmd := []string{"curl", "-s", "-m", "10", fmt.Sprintf("http://%s:8080", toPodIP)}
+	response, err := t.execCommandInPod(ctx, fromPod, curlCmd)
 	if err != nil {
 		*details = append(*details, fmt.Sprintf("✗ HTTP connectivity test failed: %v", err))
 		return TestResult{
@@ -632,13 +646,16 @@ func (t *Tester) testHTTPConnectivityBetweenPods(ctx context.Context, fromPod, t
 		}
 	}
 
-	statusCode = strings.TrimSpace(statusCode)
-	if statusCode == "200" {
-		*details = append(*details, fmt.Sprintf("✓ HTTP connectivity successful (Status: %s)", statusCode))
+	response = strings.TrimSpace(response)
+	if strings.Contains(response, "Hello World") {
+		*details = append(*details, fmt.Sprintf("✓ HTTP connectivity successful (Response: %s)", response))
 		return TestResult{Success: true, Message: "HTTP connectivity successful"}
+	} else if response != "" {
+		*details = append(*details, fmt.Sprintf("WARNING: HTTP connectivity returned unexpected response: %s", response))
+		return TestResult{Success: true, Message: "HTTP connectivity completed with unexpected response"}
 	} else {
-		*details = append(*details, fmt.Sprintf("WARNING: HTTP connectivity returned status: %s", statusCode))
-		return TestResult{Success: true, Message: "HTTP connectivity completed with non-200 status"}
+		*details = append(*details, fmt.Sprintf("✗ HTTP connectivity failed - no response received"))
+		return TestResult{Success: false, Message: "HTTP connectivity failed - no response"}
 	}
 }
 
