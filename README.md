@@ -2,6 +2,34 @@
 
 A CLI tool for testing network connectivity within Kubernetes clusters using real pod-to-pod communication tests.
 
+## **Enhanced UI & Visual Experience Branch**
+
+This branch specializes in **clean, user-friendly output** with enhanced visual presentation. Perfect for users who want clear, well-organized diagnostic results with improved readability.
+
+### **Key Features of This Branch:**
+- **Clean Visual Output**: Clear status indicators (✓, ✗) for easy scanning
+- **Improved Readability**: Clear visual hierarchy and organized test presentation
+- **Modern CLI Experience**: Contemporary terminal interface with clean formatting
+- **Status Visualization**: Easy-to-scan success/failure indicators
+- **Professional Presentation**: Perfect for demos, presentations, and user-friendly testing
+- **Organized Results**: Clear distinction between different test phases and results
+
+### **Visual Enhancements:**
+- **Launch** - Test execution launch messages
+- **Setup** - Setup and configuration phases
+- **Testing** - Active testing in progress
+- **Results** - Individual test descriptions
+- **✓** - Successful test results
+- **✗** - Failed test results
+- **Cleanup** - Cleanup operations
+- **Summary** - Summary and final results
+
+### **Perfect For:**
+- **Demo Environments**: Clean visual output for presentations
+- **User Training**: Clear, intuitive interface for learning Kubernetes networking
+- **Modern Workflows**: Contemporary CLI experience that users appreciate
+- **Documentation**: Screenshot-ready output for guides and tutorials
+
 ## Overview
 
 This project provides:
@@ -87,6 +115,63 @@ make install
 ./k8s-diagnostic test --kubeconfig /path/to/kubeconfig
 ```
 
+### **Enhanced Visual Experience Examples**
+
+```bash
+# Standard clean output with clear indicators
+./k8s-diagnostic test --namespace demo-cluster
+
+# Verbose mode with enhanced visual hierarchy
+./k8s-diagnostic test --verbose --namespace training-env
+
+# Perfect for screenshots and documentation
+./k8s-diagnostic test --namespace production-demo --verbose
+
+# Visual output ideal for presentations
+./k8s-diagnostic test --kubeconfig ~/.kube/demo-config --namespace showcase
+```
+
+### **Visual Output Benefits:**
+
+**Demo and Training Sessions:**
+```bash
+# Clear, professional output for audience engagement
+./k8s-diagnostic test --namespace kubernetes-training
+
+# Easy to follow visual progression for learners
+./k8s-diagnostic test --verbose --namespace workshop-demo
+```
+
+**Documentation and Screenshots:**
+```bash
+# Screenshot-ready output for guides and tutorials
+./k8s-diagnostic test --namespace docs-example
+
+# Visual consistency for documentation projects
+./k8s-diagnostic test --verbose --namespace user-guide-demo
+```
+
+**Modern CLI Experience:**
+```bash
+# Contemporary interface that users appreciate
+./k8s-diagnostic test --namespace modern-workflow
+
+# Visual status indicators reduce cognitive load
+./k8s-diagnostic test --verbose --namespace user-friendly-test
+```
+
+### **Example Enhanced Output Walkthrough:**
+
+**Phase 1 - Launch:** `Running connectivity diagnostic tests...`
+**Phase 2 - Setup:** `Setting up test environment...`
+**Phase 3 - Testing:** `Running diagnostic tests...`
+**Phase 4 - Individual Tests:** `Test 1: Pod-to-Pod Connectivity`
+**Phase 5 - Results:** `✓ Test 1 PASSED` or `✗ Test 1 FAILED`
+**Phase 6 - Cleanup:** `Cleaning up test environment...`
+**Phase 7 - Summary:** `Test Summary: Total Tests: 4, Passed: 4, Failed: 0`
+
+Each phase uses distinct visual indicators to create a clear, intuitive user experience that makes network diagnostics more approachable and engaging.
+
 ## Usage
 
 ### Build Script Options
@@ -133,37 +218,37 @@ Global Options:
 
 ### Standard Output
 ```
-🚀 Running connectivity diagnostic tests in namespace 'diagnostic-test'
+Running connectivity diagnostic tests in namespace 'diagnostic-test'
 
-🔧 Setting up test environment...
+Setting up test environment...
 ✓ Namespace diagnostic-test ready
 
-🧪 Running diagnostic tests...
-📋 Test 1: Pod-to-Pod Connectivity
-✅ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
+Running diagnostic tests...
+Test 1: Pod-to-Pod Connectivity
+✓ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
 
-📋 Test 2: Service to Pod Connectivity
-✅ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
+Test 2: Service to Pod Connectivity
+✓ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
 
-📋 Test 3: Cross-Node Service Connectivity
-✅ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
+Test 3: Cross-Node Service Connectivity
+✓ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
 
-📋 Test 4: DNS Resolution
-✅ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
+Test 4: DNS Resolution
+✓ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
 
-🧹 Cleaning up test environment...
+Cleaning up test environment...
 ✓ Namespace diagnostic-test cleaned up
 
-📊 Test Summary:
+Test Summary:
   Total Tests: 4, Passed: 4, Failed: 0
-  ✅ Passed Tests:
+  ✓ Passed Tests:
     • Pod-to-Pod Connectivity
     • Service to Pod Connectivity
     • Cross-Node Service Connectivity
     • DNS Resolution
 
-✅ Overall Result: All 4 diagnostic tests passed
-💡 Run with --verbose for detailed test steps
+✓ Overall Result: All 4 diagnostic tests passed
+Run with --verbose for detailed test steps
 ```
 
 ### Verbose Output
@@ -276,13 +361,13 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 // cmd/test.go
 
 // Add after Test 1: Pod-to-Pod Connectivity
-fmt.Printf("📋 Test 2: DNS Resolution\n")
+fmt.Printf("Test 2: DNS Resolution\n")
 result2 := tester.TestDNSResolution(ctx)
 
 if result2.Success {
-    fmt.Printf("✅ Test 2 PASSED: %s\n", result2.Message)
+    fmt.Printf("✓ Test 2 PASSED: %s\n", result2.Message)
 } else {
-    fmt.Printf("❌ Test 2 FAILED: %s\n", result2.Message)
+    fmt.Printf("✗ Test 2 FAILED: %s\n", result2.Message)
 }
 
 // Update overall result logic
