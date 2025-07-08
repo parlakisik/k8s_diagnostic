@@ -76,6 +76,7 @@ type TestConfig struct {
 	TargetNamespace string `json:"target_namespace"`
 	PodSelector     string `json:"pod_selector"`
 	CreateFreshPods bool   `json:"create_fresh_pods"`
+	Placement       string `json:"placement"` // "same-node", "cross-node", "both"
 }
 
 // InteractiveConfig represents configuration for interactive pod selection
@@ -323,8 +324,24 @@ func (t *Tester) testWithExistingPods(ctx context.Context, config TestConfig) Te
 	}
 }
 
-// testWithFreshPods tests connectivity using newly created pods (current logic)
+// testWithFreshPods tests connectivity using newly created pods with placement strategy support
 func (t *Tester) testWithFreshPods(ctx context.Context, config TestConfig) TestResult {
+	// Handle different placement strategies
+	switch config.Placement {
+	case "same-node":
+		return t.testSameNodePods(ctx, config)
+	case "cross-node":
+		return t.testCrossNodePods(ctx, config)
+	case "both":
+		return t.testBothPlacements(ctx, config)
+	default:
+		// Default to "both" for backward compatibility
+		return t.testBothPlacements(ctx, config)
+	}
+}
+
+// testSameNodePods tests connectivity between pods on the same worker node
+func (t *Tester) testSameNodePods(ctx context.Context, config TestConfig) TestResult {
 	var details []string
 
 	// Get worker nodes
@@ -337,20 +354,24 @@ func (t *Tester) testWithFreshPods(ctx context.Context, config TestConfig) TestR
 		}
 	}
 
-	if len(workerNodes) < 2 {
+	if len(workerNodes) < 1 {
 		return TestResult{
 			Success: false,
-			Message: fmt.Sprintf("Need at least 2 worker nodes, found %d", len(workerNodes)),
+			Message: "Need at least 1 worker node for same-node testing",
 			Details: details,
 		}
 	}
 	details = append(details, fmt.Sprintf("✓ Found %d worker nodes", len(workerNodes)))
 
-	// Create two test pods
-	pod1Name := "netshoot-test-1"
-	pod2Name := "netshoot-test-2"
+	// Pick the first worker node for both pods
+	selectedNode := workerNodes[0]
+	details = append(details, fmt.Sprintf("✓ Selected node %s for same-node testing", selectedNode))
 
-	_, err = t.createNetshootPod(ctx, pod1Name, workerNodes[0])
+	// Create two test pods on the same node
+	pod1Name := "netshoot-same-1"
+	pod2Name := "netshoot-same-2"
+
+	_, err = t.createNetshootPod(ctx, pod1Name, selectedNode)
 	if err != nil {
 		return TestResult{
 			Success: false,
@@ -358,20 +379,20 @@ func (t *Tester) testWithFreshPods(ctx context.Context, config TestConfig) TestR
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod1Name, workerNodes[0]))
+	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod1Name, selectedNode))
 
-	pod2, err := t.createNetshootPod(ctx, pod2Name, workerNodes[1])
+	pod2, err := t.createNetshootPod(ctx, pod2Name, selectedNode)
 	if err != nil {
-		t.cleanupPod(ctx, pod1Name) // Cleanup first pod
+		t.cleanupPod(ctx, pod1Name)
 		return TestResult{
 			Success: false,
 			Message: fmt.Sprintf("Failed to create pod %s: %v", pod2Name, err),
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod2Name, workerNodes[1]))
+	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod2Name, selectedNode))
 
-	// Wait for pods to be ready (increased timeout for image pull)
+	// Wait for pods to be ready
 	if err := t.waitForPodReady(ctx, pod1Name, 120*time.Second); err != nil {
 		t.cleanupPods(ctx, pod1Name, pod2Name)
 		return TestResult{
@@ -392,96 +413,320 @@ func (t *Tester) testWithFreshPods(ctx context.Context, config TestConfig) TestR
 	}
 	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod2Name))
 
-	// Get pod IPs
-	pod2IP := pod2.Status.PodIP
-	if pod2IP == "" {
-		// Refresh pod info to get IP
-		pod2, err = t.clientset.CoreV1().Pods(t.namespace).Get(ctx, pod2Name, metav1.GetOptions{})
-		if err != nil || pod2.Status.PodIP == "" {
-			t.cleanupPods(ctx, pod1Name, pod2Name)
-			return TestResult{
-				Success: false,
-				Message: fmt.Sprintf("Failed to get IP for pod %s", pod2Name),
-				Details: details,
-			}
-		}
-		pod2IP = pod2.Status.PodIP
-	}
-	details = append(details, fmt.Sprintf("✓ Pod %s IP: %s", pod2Name, pod2IP))
+	// Test connectivity (ping + HTTP)
+	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "same-node", &details)
 
-	// Test connectivity by pinging from pod1 to pod2
-	pingResult, err := t.pingFromPod(ctx, pod1Name, pod2IP)
-
-	// Cleanup pods regardless of ping result
+	// Cleanup pods
 	t.cleanupPods(ctx, pod1Name, pod2Name)
 	details = append(details, "✓ Cleaned up test pods")
 
-	// Analyze ping results
+	result.Details = details
+	return result
+}
+
+// testCrossNodePods tests connectivity between pods on different worker nodes
+func (t *Tester) testCrossNodePods(ctx context.Context, config TestConfig) TestResult {
+	var details []string
+
+	// Get worker nodes
+	workerNodes, err := t.getWorkerNodes(ctx)
 	if err != nil {
-		details = append(details, fmt.Sprintf("✗ Ping command failed: %v", err))
-		details = append(details, fmt.Sprintf("  Output: %s", pingResult))
-
-		// Create detailed diagnostics for ping failure
-		detailedDiagnostics := &DetailedDiagnostics{
-			FailureStage:   "connectivity_test",
-			TechnicalError: fmt.Sprintf("100%% packet loss during ping test: %v", err),
-			CommandOutputs: []CommandOutput{
-				{
-					Command:     fmt.Sprintf("ping -c 3 -W 3 -i 1 %s", pod2IP),
-					ExitCode:    1, // Ping failure exit code
-					Stdout:      pingResult,
-					Description: "Cross-node ping test from pod to pod",
-				},
-			},
-			NetworkContext: &NetworkContext{
-				SourceNode:  workerNodes[0],
-				TargetNode:  workerNodes[1],
-				TargetPodIP: pod2IP,
-				AdditionalInfo: map[string]string{
-					"pod_1_name": pod1Name,
-					"pod_2_name": pod2Name,
-					"test_type":  "cross_node_ping",
-				},
-			},
-			TroubleshootingHints: []string{
-				"Check CNI network configuration",
-				"Verify cross-node routing is enabled",
-				"Check firewall rules between nodes",
-				"Validate pod CIDR configuration",
-				"Ensure kube-proxy is running on all nodes",
-			},
-		}
-
-		return TestResult{
-			Success:             false,
-			Message:             fmt.Sprintf("Pod %s is not reachable from pod %s", pod2Name, pod1Name),
-			Details:             details,
-			DetailedDiagnostics: detailedDiagnostics,
-		}
-	}
-
-	// Check for successful ping patterns
-	pingLower := strings.ToLower(pingResult)
-	if strings.Contains(pingLower, "0% packet loss") ||
-		(strings.Contains(pingLower, "3 packets transmitted") && strings.Contains(pingLower, "3 received")) ||
-		(strings.Contains(pingLower, "transmitted") && strings.Contains(pingLower, "received") && !strings.Contains(pingLower, "100% packet loss")) {
-
-		details = append(details, "✓ Ping successful - pods can communicate")
-		details = append(details, fmt.Sprintf("  Ping output: %s", strings.TrimSpace(pingResult)))
-		return TestResult{
-			Success: true,
-			Message: fmt.Sprintf("Pod %s is reachable from pod %s", pod2Name, pod1Name),
-			Details: details,
-		}
-	} else {
-		details = append(details, fmt.Sprintf("✗ Ping failed - pod %s is not reachable from pod %s", pod2Name, pod1Name))
-		details = append(details, fmt.Sprintf("  Ping output: %s", strings.TrimSpace(pingResult)))
 		return TestResult{
 			Success: false,
-			Message: fmt.Sprintf("Pod %s is not reachable from pod %s", pod2Name, pod1Name),
+			Message: fmt.Sprintf("Failed to get worker nodes: %v", err),
 			Details: details,
 		}
 	}
+
+	if len(workerNodes) < 2 {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Need at least 2 worker nodes for cross-node testing, found %d", len(workerNodes)),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Found %d worker nodes", len(workerNodes)))
+
+	// Create two test pods on different nodes
+	pod1Name := "netshoot-cross-1"
+	pod2Name := "netshoot-cross-2"
+
+	_, err = t.createNetshootPod(ctx, pod1Name, workerNodes[0])
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create pod %s: %v", pod1Name, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod1Name, workerNodes[0]))
+
+	pod2, err := t.createNetshootPod(ctx, pod2Name, workerNodes[1])
+	if err != nil {
+		t.cleanupPod(ctx, pod1Name)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create pod %s: %v", pod2Name, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod2Name, workerNodes[1]))
+
+	// Wait for pods to be ready
+	if err := t.waitForPodReady(ctx, pod1Name, 120*time.Second); err != nil {
+		t.cleanupPods(ctx, pod1Name, pod2Name)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod1Name, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod1Name))
+
+	if err := t.waitForPodReady(ctx, pod2Name, 120*time.Second); err != nil {
+		t.cleanupPods(ctx, pod1Name, pod2Name)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod2Name, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod2Name))
+
+	// Test connectivity (ping + HTTP)
+	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "cross-node", &details)
+
+	// Cleanup pods
+	t.cleanupPods(ctx, pod1Name, pod2Name)
+	details = append(details, "✓ Cleaned up test pods")
+
+	result.Details = details
+	return result
+}
+
+// testBothPlacements runs both same-node and cross-node tests, returning combined results
+func (t *Tester) testBothPlacements(ctx context.Context, config TestConfig) TestResult {
+	var allDetails []string
+
+	// Test same-node first
+	sameNodeConfig := config
+	sameNodeConfig.Placement = "same-node"
+	sameNodeResult := t.testSameNodePods(ctx, sameNodeConfig)
+
+	allDetails = append(allDetails, "=== Same-Node Connectivity Test ===")
+	allDetails = append(allDetails, sameNodeResult.Details...)
+
+	// Test cross-node second
+	crossNodeConfig := config
+	crossNodeConfig.Placement = "cross-node"
+	crossNodeResult := t.testCrossNodePods(ctx, crossNodeConfig)
+
+	allDetails = append(allDetails, "")
+	allDetails = append(allDetails, "=== Cross-Node Connectivity Test ===")
+	allDetails = append(allDetails, crossNodeResult.Details...)
+
+	// Determine overall success
+	bothSuccess := sameNodeResult.Success && crossNodeResult.Success
+	var message string
+	if bothSuccess {
+		message = "Both same-node and cross-node connectivity tests passed"
+	} else if sameNodeResult.Success {
+		message = "Same-node connectivity passed, cross-node failed"
+	} else if crossNodeResult.Success {
+		message = "Cross-node connectivity passed, same-node failed"
+	} else {
+		message = "Both same-node and cross-node connectivity tests failed"
+	}
+
+	return TestResult{
+		Success: bothSuccess,
+		Message: message,
+		Details: allDetails,
+	}
+}
+
+// testPodConnectivity tests both ping and HTTP connectivity between two pods
+func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string, toPodObj *corev1.Pod, placement string, details *[]string) TestResult {
+	// Get target pod IP
+	pod2IP := toPodObj.Status.PodIP
+	if pod2IP == "" {
+		// Refresh pod info to get IP
+		refreshedPod, err := t.clientset.CoreV1().Pods(t.namespace).Get(ctx, toPod, metav1.GetOptions{})
+		if err != nil || refreshedPod.Status.PodIP == "" {
+			return TestResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to get IP for pod %s", toPod),
+			}
+		}
+		pod2IP = refreshedPod.Status.PodIP
+	}
+	*details = append(*details, fmt.Sprintf("✓ Pod %s IP: %s", toPod, pod2IP))
+
+	// Test 1: ICMP ping connectivity
+	pingResult, pingErr := t.pingFromPod(ctx, fromPod, pod2IP)
+	var pingLatency float64
+
+	if pingErr != nil {
+		*details = append(*details, fmt.Sprintf("WARNING: ICMP ping failed: %v", pingErr))
+		*details = append(*details, fmt.Sprintf("  Output: %s", pingResult))
+	} else {
+		// Extract latency from ping result
+		pingLatency = t.extractPingLatency(pingResult)
+
+		// Check for successful ping patterns
+		pingLower := strings.ToLower(pingResult)
+		if strings.Contains(pingLower, "0% packet loss") ||
+			(strings.Contains(pingLower, "3 packets transmitted") && strings.Contains(pingLower, "3 received")) {
+			*details = append(*details, fmt.Sprintf("✓ ICMP ping successful (%.2fms avg latency)", pingLatency))
+		} else {
+			*details = append(*details, fmt.Sprintf("WARNING: ICMP ping unreliable: %s", strings.TrimSpace(pingResult)))
+		}
+	}
+
+	// Test 2: HTTP connectivity using netshoot's Python HTTP server
+	httpResult := t.testHTTPConnectivityBetweenPods(ctx, fromPod, toPod, pod2IP, details)
+	if !httpResult.Success {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Pod connectivity test failed (%s): %s", placement, httpResult.Message),
+		}
+	}
+
+	// Both tests successful
+	successMsg := fmt.Sprintf("Pod connectivity test passed (%s)", placement)
+	if pingLatency > 0 {
+		successMsg += fmt.Sprintf(" - avg latency: %.2fms", pingLatency)
+	}
+
+	return TestResult{
+		Success: true,
+		Message: successMsg,
+	}
+}
+
+// testHTTPConnectivityBetweenPods tests HTTP connectivity by starting a web server in one pod and curling from another
+func (t *Tester) testHTTPConnectivityBetweenPods(ctx context.Context, fromPod, toPod, toPodIP string, details *[]string) TestResult {
+	// Start a simple HTTP server in the target pod using netshoot's Python
+	serverCmd := []string{"python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"}
+
+	// Start HTTP server in background (this will run until pod is deleted)
+	err := t.execCommandInPodAsync(ctx, toPod, serverCmd)
+	if err != nil {
+		*details = append(*details, fmt.Sprintf("WARNING: Failed to start HTTP server in pod %s: %v", toPod, err))
+		return TestResult{Success: true, Message: "HTTP test skipped - server startup failed"}
+	}
+
+	*details = append(*details, fmt.Sprintf("✓ Started HTTP server in pod %s on port 8080", toPod))
+
+	// Wait a moment for server to start
+	time.Sleep(2 * time.Second)
+
+	// Test HTTP connectivity from the source pod
+	curlCmd := []string{"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", fmt.Sprintf("http://%s:8080", toPodIP)}
+	statusCode, err := t.execCommandInPod(ctx, fromPod, curlCmd)
+	if err != nil {
+		*details = append(*details, fmt.Sprintf("✗ HTTP connectivity test failed: %v", err))
+		return TestResult{
+			Success: false,
+			Message: "HTTP connectivity test failed",
+		}
+	}
+
+	statusCode = strings.TrimSpace(statusCode)
+	if statusCode == "200" {
+		*details = append(*details, fmt.Sprintf("✓ HTTP connectivity successful (Status: %s)", statusCode))
+		return TestResult{Success: true, Message: "HTTP connectivity successful"}
+	} else {
+		*details = append(*details, fmt.Sprintf("WARNING: HTTP connectivity returned status: %s", statusCode))
+		return TestResult{Success: true, Message: "HTTP connectivity completed with non-200 status"}
+	}
+}
+
+// extractPingLatency extracts average latency from ping output
+func (t *Tester) extractPingLatency(pingOutput string) float64 {
+	lines := strings.Split(pingOutput, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "rtt min/avg/max/mdev") {
+			// Example: rtt min/avg/max/mdev = 0.346/0.466/0.635/0.122 ms
+			parts := strings.Split(line, "=")
+			if len(parts) > 1 {
+				values := strings.TrimSpace(parts[1])
+				values = strings.Replace(values, " ms", "", -1)
+				latencyParts := strings.Split(values, "/")
+				if len(latencyParts) >= 2 {
+					if avgLatency, err := strconv.ParseFloat(latencyParts[1], 64); err == nil {
+						return avgLatency
+					}
+				}
+			}
+		}
+	}
+	return 0.0
+}
+
+// execCommandInPod executes a command in a pod and returns the output
+func (t *Tester) execCommandInPod(ctx context.Context, podName string, command []string) (string, error) {
+	req := t.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(t.namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Container: "netshoot",
+		Command:   command,
+		Stdout:    true,
+		Stderr:    true,
+	}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	output := stdout.String()
+	if err != nil {
+		if stderr.Len() > 0 {
+			return output + "\nSTDERR: " + stderr.String(), err
+		}
+		return output, err
+	}
+
+	return output, nil
+}
+
+// execCommandInPodAsync executes a command in a pod asynchronously (for background processes like web servers)
+func (t *Tester) execCommandInPodAsync(ctx context.Context, podName string, command []string) error {
+	req := t.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(t.namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Container: "netshoot",
+		Command:   command,
+		Stdout:    false,
+		Stderr:    false,
+	}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
+	if err != nil {
+		return fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	// Start the command in background by not waiting for completion
+	go func() {
+		exec.StreamWithContext(ctx, remotecommand.StreamOptions{})
+	}()
+
+	return nil
 }
 
 // TestCrossNodeServiceConnectivity creates nginx deployment, service, and tests connectivity from a remote node
