@@ -36,6 +36,8 @@ All test resources will be created in the specified namespace (default: diagnost
 		preferCrossNode, _ := cmd.Flags().GetBool("prefer-cross-node")
 		showAllPods, _ := cmd.Flags().GetBool("show-all-pods")
 		placement, _ := cmd.Flags().GetString("placement")
+		includeNodePort, _ := cmd.Flags().GetBool("include-nodeport")
+		includeLoadBalancer, _ := cmd.Flags().GetBool("include-loadbalancer")
 
 		// Create tester early for interactive mode
 		ctx := context.Background()
@@ -128,6 +130,16 @@ All test resources will be created in the specified namespace (default: diagnost
 		executeTimedTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &timedResults, &testNames)
 		executeTimedTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &timedResults, &testNames)
 		executeTimedTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &timedResults, &testNames)
+
+		// Conditional tests based on flags
+		testNum := 5
+		if includeNodePort {
+			executeTimedTest(testNum, "NodePort Service Connectivity", tester.TestNodePortServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			testNum++
+		}
+		if includeLoadBalancer {
+			executeTimedTest(testNum, "LoadBalancer Service Connectivity", tester.TestLoadBalancerServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+		}
 
 		// Record overall end time
 		overallEndTime := time.Now()
@@ -359,4 +371,6 @@ func init() {
 	testCmd.Flags().Bool("prefer-cross-node", true, "prioritize pods on different nodes for cross-node testing")
 	testCmd.Flags().Bool("show-all-pods", false, "include non-netshoot pods in discovery (default: only network-capable pods)")
 	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
+	testCmd.Flags().Bool("include-nodeport", false, "include NodePort service connectivity tests")
+	testCmd.Flags().Bool("include-loadbalancer", false, "include LoadBalancer service connectivity tests")
 }

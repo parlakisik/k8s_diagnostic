@@ -2241,3 +2241,402 @@ func (t *Tester) pingFromPodInNamespace(ctx context.Context, fromPod, namespace,
 
 	return output, nil
 }
+
+// TestNodePortServiceConnectivity tests NodePort service connectivity from external diagnostic pod
+func (t *Tester) TestNodePortServiceConnectivity(ctx context.Context) TestResult {
+	var details []string
+
+	// Step 1: Create nginx deployment with 2 replicas
+	deploymentName := "web-nodeport"
+	serviceName := "web-nodeport"
+	testPodName := "netshoot-nodeport-test"
+
+	// Create nginx deployment
+	_, err := t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' with 2 replicas", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create NodePort service
+	nodePortService, err := t.createNodePortService(ctx, serviceName, deploymentName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create NodePort service: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created NodePort service '%s'", serviceName))
+
+	// Get the NodePort
+	var nodePort int32
+	for _, port := range nodePortService.Spec.Ports {
+		if port.NodePort != 0 {
+			nodePort = port.NodePort
+			break
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Service assigned NodePort: %d", nodePort))
+
+	// Step 3: Get node external IP
+	nodeIP, err := t.getNodeExternalIP(ctx)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get node external IP: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Node external IP: %s", nodeIP))
+
+	// Step 4: Create external test pod with hostNetwork
+	_, err = t.createExternalTestPod(ctx, testPodName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create external test pod: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created external test pod '%s' with hostNetwork", testPodName))
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("External test pod %s did not become ready: %v", testPodName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ External test pod '%s' is ready", testPodName))
+
+	// Step 5: Test NodePort connectivity
+	nodePortURL := fmt.Sprintf("%s:%d", nodeIP, nodePort)
+	statusCode, content, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, nodePortURL)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ NodePort connectivity failed: %v", err))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "NodePort service connectivity failed",
+			Details: details,
+		}
+	}
+
+	// Check HTTP status code
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
+		details = append(details, fmt.Sprintf("✓ NodePort connectivity successful - Status: %s", statusCode))
+		details = append(details, fmt.Sprintf("  External access: curl http://%s", nodePortURL))
+	} else {
+		details = append(details, fmt.Sprintf("WARNING: NodePort connectivity issue - %s", message))
+	}
+
+	// Show response content if available
+	if content != "" && strings.Contains(strings.ToLower(content), "welcome to nginx") {
+		details = append(details, fmt.Sprintf("  Response: nginx welcome page detected"))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up all NodePort test resources")
+
+	return TestResult{
+		Success: true,
+		Message: fmt.Sprintf("NodePort service connectivity validated - external access via %s", nodePortURL),
+		Details: details,
+	}
+}
+
+// TestLoadBalancerServiceConnectivity tests LoadBalancer service connectivity from external diagnostic pod
+func (t *Tester) TestLoadBalancerServiceConnectivity(ctx context.Context) TestResult {
+	var details []string
+
+	// Step 1: Create nginx deployment with 2 replicas
+	deploymentName := "web-loadbalancer"
+	serviceName := "web-loadbalancer"
+	testPodName := "netshoot-loadbalancer-test"
+
+	// Create nginx deployment
+	_, err := t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' with 2 replicas", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create LoadBalancer service
+	loadBalancerService, err := t.createLoadBalancerService(ctx, serviceName, deploymentName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create LoadBalancer service: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created LoadBalancer service '%s'", serviceName))
+
+	// Check for MetalLB annotation
+	if t.hasMetalLBAnnotation(loadBalancerService) {
+		details = append(details, "✓ MetalLB address pool annotation detected")
+	} else {
+		details = append(details, "ℹ No MetalLB annotation found - using default LoadBalancer configuration")
+	}
+
+	// Step 3: Wait for LoadBalancer external IP
+	externalIP, err := t.waitForLoadBalancerIP(ctx, serviceName, 60*time.Second)
+	if err != nil {
+		details = append(details, fmt.Sprintf("WARNING: LoadBalancer external IP not available: %v", err))
+		details = append(details, "ℹ This may be expected if no LoadBalancer provider is configured")
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "LoadBalancer external IP not available - check LoadBalancer provider configuration",
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ LoadBalancer external IP: %s", externalIP))
+
+	// Step 4: Create external test pod with hostNetwork
+	_, err = t.createExternalTestPod(ctx, testPodName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create external test pod: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created external test pod '%s' with hostNetwork", testPodName))
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("External test pod %s did not become ready: %v", testPodName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ External test pod '%s' is ready", testPodName))
+
+	// Step 5: Test LoadBalancer connectivity
+	statusCode, content, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, externalIP)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ LoadBalancer connectivity failed: %v", err))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "LoadBalancer service connectivity failed",
+			Details: details,
+		}
+	}
+
+	// Check HTTP status code
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
+		details = append(details, fmt.Sprintf("✓ LoadBalancer connectivity successful - Status: %s", statusCode))
+		details = append(details, fmt.Sprintf("  External access: curl http://%s", externalIP))
+	} else {
+		details = append(details, fmt.Sprintf("WARNING: LoadBalancer connectivity issue - %s", message))
+	}
+
+	// Show response content if available
+	if content != "" && strings.Contains(strings.ToLower(content), "welcome to nginx") {
+		details = append(details, fmt.Sprintf("  Response: nginx welcome page detected"))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up all LoadBalancer test resources")
+
+	return TestResult{
+		Success: true,
+		Message: fmt.Sprintf("LoadBalancer service connectivity validated - external access via %s", externalIP),
+		Details: details,
+	}
+}
+
+// createNodePortService creates a NodePort service to expose the deployment
+func (t *Tester) createNodePortService(ctx context.Context, serviceName, deploymentName string) (*corev1.Service, error) {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: t.namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": deploymentName,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Type: corev1.ServiceTypeNodePort,
+		},
+	}
+
+	return t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+}
+
+// createLoadBalancerService creates a LoadBalancer service to expose the deployment
+func (t *Tester) createLoadBalancerService(ctx context.Context, serviceName, deploymentName string) (*corev1.Service, error) {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: t.namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": deploymentName,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Type: corev1.ServiceTypeLoadBalancer,
+		},
+	}
+
+	return t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+}
+
+// createExternalTestPod creates a test pod with hostNetwork: true for external access simulation
+func (t *Tester) createExternalTestPod(ctx context.Context, name string) (*corev1.Pod, error) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: t.namespace,
+			Labels: map[string]string{
+				"app": "netshoot-external-test",
+			},
+		},
+		Spec: corev1.PodSpec{
+			HostNetwork: true, // Enable host network for external access
+			Containers: []corev1.Container{
+				{
+					Name:  "netshoot",
+					Image: "nicolaka/netshoot",
+					Command: []string{
+						"sleep",
+						"3600", // Sleep for 1 hour
+					},
+					Resources: corev1.ResourceRequirements{},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}
+
+	createdPod, err := t.clientset.CoreV1().Pods(t.namespace).Create(ctx, pod, metav1.CreateOptions{})
+	return createdPod, err
+}
+
+// getNodeExternalIP gets the external IP of a node for NodePort testing
+func (t *Tester) getNodeExternalIP(ctx context.Context) (string, error) {
+	nodes, err := t.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list nodes: %v", err)
+	}
+
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeExternalIP {
+				return address.Address, nil
+			}
+		}
+	}
+
+	// Fallback to internal IP if no external IP is available
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			if address.Type == corev1.NodeInternalIP {
+				return address.Address, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no node IP address found")
+}
+
+// waitForLoadBalancerIP waits for a LoadBalancer service to get an external IP
+func (t *Tester) waitForLoadBalancerIP(ctx context.Context, serviceName string, timeout time.Duration) (string, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return "", fmt.Errorf("LoadBalancer service %s did not get external IP within %v", serviceName, timeout)
+		case <-ticker.C:
+			service, err := t.clientset.CoreV1().Services(t.namespace).Get(ctx, serviceName, metav1.GetOptions{})
+			if err != nil {
+				continue
+			}
+
+			if len(service.Status.LoadBalancer.Ingress) > 0 {
+				ingress := service.Status.LoadBalancer.Ingress[0]
+				// Check for IP address first, then hostname
+				if ingress.IP != "" {
+					return ingress.IP, nil
+				}
+				if ingress.Hostname != "" {
+					return ingress.Hostname, nil
+				}
+			}
+		}
+	}
+}
+
+// hasMetalLBAnnotation checks if a service has MetalLB address pool annotation
+func (t *Tester) hasMetalLBAnnotation(service *corev1.Service) bool {
+	if service.Annotations == nil {
+		return false
+	}
+	_, exists := service.Annotations["metallb.universe.tf/address-pool"]
+	return exists
+}
