@@ -6,6 +6,30 @@ A CLI tool for testing network connectivity within Kubernetes clusters using rea
 
 This branch specializes in **clean, user-friendly output** with enhanced visual presentation. Perfect for users who want clear, well-organized diagnostic results with improved readability.
 
+### **Available Feature Branches:**
+
+Explore other enhanced versions with specialized capabilities:
+
+- **[feature/nodeport-loadbalancer-service-tests](../../tree/feature/nodeport-loadbalancer-service-tests)** - **FLAGSHIP** 
+  - ✓ External service testing (NodePort/LoadBalancer)
+  - ✓ 5 total tests (adds external access validation)
+  - ✓ Production-grade service exposure testing
+
+- **[feature/existing-pods-support](../../tree/feature/existing-pods-support)**
+  - ✓ Interactive pod discovery and selection
+  - ✓ Test existing workloads instead of creating new pods
+  - ✓ Production-safe testing with zero additional resources
+
+- **[feature/same-node-pod-placement](../../tree/feature/same-node-pod-placement)**
+  - ✓ Advanced pod placement control (same-node/cross-node/both)
+  - ✓ Performance comparison and targeted testing
+  - ✓ Network topology validation
+
+- **[main](../../tree/main)** - **BASE VERSION**
+  - ✓ Core 4 connectivity tests foundation
+  - ✓ Comprehensive documentation and examples
+  - ✓ Production-ready base functionality
+
 ### **Key Features of This Branch:**
 - **Clean Visual Output**: Clear status indicators (✓, ✗) for easy scanning
 - **Improved Readability**: Clear visual hierarchy and organized test presentation
