@@ -72,10 +72,11 @@ type DetailedDiagnostics struct {
 
 // TestConfig represents configuration for test execution
 type TestConfig struct {
-	UseExistingPods bool   `json:"use_existing_pods"`
-	TargetNamespace string `json:"target_namespace"`
-	PodSelector     string `json:"pod_selector"`
-	CreateFreshPods bool   `json:"create_fresh_pods"`
+	UseExistingPods  bool     `json:"use_existing_pods"`
+	TargetNamespace  string   `json:"target_namespace"`
+	PodSelector      string   `json:"pod_selector"`
+	SelectedPodNames []string `json:"selected_pod_names,omitempty"` // Specific pod names when no common labels exist
+	CreateFreshPods  bool     `json:"create_fresh_pods"`
 }
 
 // InteractiveConfig represents configuration for interactive pod selection
@@ -1232,13 +1233,14 @@ func (t *Tester) InteractivePodSelection(ctx context.Context, config Interactive
 	}
 
 	// Generate a selector that matches the selected pods
-	selector := t.generatePodSelector(selectedPods)
+	selector, podNames := t.generatePodSelector(selectedPods)
 
 	return TestConfig{
-		UseExistingPods: true,
-		TargetNamespace: config.TargetNamespace,
-		PodSelector:     selector,
-		CreateFreshPods: false,
+		UseExistingPods:  true,
+		TargetNamespace:  config.TargetNamespace,
+		PodSelector:      selector,
+		SelectedPodNames: podNames,
+		CreateFreshPods:  false,
 	}, nil
 }
 
@@ -1371,9 +1373,10 @@ func (t *Tester) sortPodsByScore(pods []PodInfo, preferCrossNode bool) {
 }
 
 // generatePodSelector creates a label selector that matches the selected pods
-func (t *Tester) generatePodSelector(pods []PodInfo) string {
+// Returns (selector, podNames) - if selector is empty, use podNames for direct selection
+func (t *Tester) generatePodSelector(pods []PodInfo) (string, []string) {
 	if len(pods) == 0 {
-		return ""
+		return "", nil
 	}
 
 	// Try to find a common label among all selected pods
@@ -1397,18 +1400,17 @@ func (t *Tester) generatePodSelector(pods []PodInfo) string {
 	for k, v := range commonLabels {
 		// Skip kubernetes system labels
 		if !strings.HasPrefix(k, "kubernetes.io/") && !strings.HasPrefix(k, "k8s.io/") {
-			return fmt.Sprintf("%s=%s", k, v)
+			return fmt.Sprintf("%s=%s", k, v), nil
 		}
 	}
 
-	// Fallback: create a selector based on pod names (this is a hack but works for demonstration)
+	// No common labels found - return pod names for direct selection
 	var names []string
 	for _, pod := range pods {
 		names = append(names, pod.Name)
 	}
 
-	// Return a pseudo-selector (this won't actually work in practice, but shows the concept)
-	return fmt.Sprintf("pod-name in (%s)", strings.Join(names, ","))
+	return "", names
 }
 
 // cleanupPod removes a single pod
@@ -1897,19 +1899,35 @@ func (t *Tester) cleanupServiceResources(ctx context.Context, deploymentName, se
 	}
 }
 
-// findExistingNetshootPods discovers existing pods matching the selector in the target namespace
+// findExistingNetshootPods discovers existing pods using either label selector or specific pod names
 func (t *Tester) findExistingNetshootPods(ctx context.Context, config TestConfig) ([]corev1.Pod, error) {
-	// List pods in the target namespace with the specified selector
-	pods, err := t.clientset.CoreV1().Pods(config.TargetNamespace).List(ctx, metav1.ListOptions{
-		LabelSelector: config.PodSelector,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods in namespace %s: %v", config.TargetNamespace, err)
+	var pods []corev1.Pod
+
+	if len(config.SelectedPodNames) > 0 {
+		// Mode 1: Use specific pod names (when no common labels exist)
+		for _, podName := range config.SelectedPodNames {
+			pod, err := t.clientset.CoreV1().Pods(config.TargetNamespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to get pod %s in namespace %s: %v", podName, config.TargetNamespace, err)
+			}
+			pods = append(pods, *pod)
+		}
+	} else if config.PodSelector != "" {
+		// Mode 2: Use label selector (existing behavior)
+		podList, err := t.clientset.CoreV1().Pods(config.TargetNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: config.PodSelector,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to list pods in namespace %s: %v", config.TargetNamespace, err)
+		}
+		pods = podList.Items
+	} else {
+		return nil, fmt.Errorf("either PodSelector or SelectedPodNames must be specified")
 	}
 
+	// Filter for ready pods only
 	var readyPods []corev1.Pod
-	for _, pod := range pods.Items {
-		// Only include ready pods
+	for _, pod := range pods {
 		if t.isPodReady(&pod) {
 			readyPods = append(readyPods, pod)
 		}
