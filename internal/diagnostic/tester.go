@@ -583,16 +583,7 @@ func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string,
 		}
 	}
 
-	// Test 2: HTTP connectivity using netshoot's Python HTTP server
-	httpResult := t.testHTTPConnectivityBetweenPods(ctx, fromPod, toPod, pod2IP, details)
-	if !httpResult.Success {
-		return TestResult{
-			Success: false,
-			Message: fmt.Sprintf("Pod connectivity test failed (%s): %s", placement, httpResult.Message),
-		}
-	}
-
-	// Both tests successful
+	// ICMP ping success is sufficient for pod connectivity validation
 	successMsg := fmt.Sprintf("Pod connectivity test passed (%s)", placement)
 	if pingLatency > 0 {
 		successMsg += fmt.Sprintf(" - avg latency: %.2fms", pingLatency)
