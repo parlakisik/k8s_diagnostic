@@ -35,6 +35,7 @@ All test resources will be created in the specified namespace (default: diagnost
 		autoCreateMissing, _ := cmd.Flags().GetBool("auto-create-missing")
 		preferCrossNode, _ := cmd.Flags().GetBool("prefer-cross-node")
 		showAllPods, _ := cmd.Flags().GetBool("show-all-pods")
+		placement, _ := cmd.Flags().GetString("placement")
 
 		// Create tester early for interactive mode
 		ctx := context.Background()
@@ -120,6 +121,7 @@ All test resources will be created in the specified namespace (default: diagnost
 			TargetNamespace: targetNamespace,
 			PodSelector:     podSelector,
 			CreateFreshPods: !useExistingPods,
+			Placement:       placement,
 		}
 
 		executeTimedTestWithConfig(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivityWithConfig, ctx, verbose, testConfig, &timedResults, &testNames)
@@ -356,4 +358,5 @@ func init() {
 	testCmd.Flags().Bool("auto-create-missing", false, "automatically create pods if insufficient for testing")
 	testCmd.Flags().Bool("prefer-cross-node", true, "prioritize pods on different nodes for cross-node testing")
 	testCmd.Flags().Bool("show-all-pods", false, "include non-netshoot pods in discovery (default: only network-capable pods)")
+	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
 }
