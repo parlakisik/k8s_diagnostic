@@ -1,0 +1,120 @@
+{
+  "execution_info": {
+    "timestamp": "2025-07-08T11:40:29-07:00",
+    "filename": "k8s-diagnostic-results-20250708-114200.json",
+    "namespace": "mgmt-diagnostic-test",
+    "kubeconfig_source": "/Users/daryakut/Desktop/eks-anywhere-cluster-setup/mgmt/mgmt-eks-a-cluster.kubeconfig",
+    "verbose_mode": true
+  },
+  "tests": [
+    {
+      "test_number": 1,
+      "test_name": "Pod-to-Pod Connectivity",
+      "description": "Validates direct pod communication across different worker nodes, testing CNI networking and inter-node communication",
+      "status": "PASSED",
+      "success_message": "Pod netshoot-test-2 is reachable from pod netshoot-test-1",
+      "details": [
+        "✓ Found 3 worker nodes",
+        "✓ Created pod netshoot-test-1 on node mgmt-md-0-px9k6-4xwsc",
+        "✓ Created pod netshoot-test-2 on node mgmt-md-0-px9k6-89hgx",
+        "✓ Pod netshoot-test-1 is ready",
+        "✓ Pod netshoot-test-2 is ready",
+        "✓ Pod netshoot-test-2 IP: 192.168.3.28",
+        "✓ Cleaned up test pods",
+        "✓ Ping successful - pods can communicate",
+        "  Ping output: PING 192.168.3.28 (192.168.3.28) 56(84) bytes of data.\n64 bytes from 192.168.3.28: icmp_seq=1 ttl=126 time=0.635 ms\n64 bytes from 192.168.3.28: icmp_seq=2 ttl=126 time=0.346 ms\n64 bytes from 192.168.3.28: icmp_seq=3 ttl=126 time=0.417 ms\n\n--- 192.168.3.28 ping statistics ---\n3 packets transmitted, 3 received, 0% packet loss, time 2108ms\nrtt min/avg/max/mdev = 0.346/0.466/0.635/0.122 ms"
+      ],
+      "start_time": "2025-07-08T11:40:30-07:00",
+      "end_time": "2025-07-08T11:41:07-07:00",
+      "execution_time_seconds": 36.931651375
+    },
+    {
+      "test_number": 2,
+      "test_name": "Service to Pod Connectivity",
+      "description": "Validates Kubernetes service discovery, HTTP connectivity, and load balancing across multiple pod replicas",
+      "status": "PASSED",
+      "success_message": "Service to Pod connectivity test passed - HTTP connectivity and load balancing working",
+      "details": [
+        "✓ Created nginx deployment 'web' with 2 replicas",
+        "✓ Deployment 'web' is ready",
+        "✓ Created service 'web'",
+        "✓ Service IP is 10.96.172.118 (kubectl get svc web -n mgmt-diagnostic-test -o jsonpath='{.spec.clusterIP}')",
+        "✓ Created test pod 'netshoot-service-test'",
+        "✓ Test pod 'netshoot-service-test' is ready",
+        "WARNING: ICMP ping to service IP failed: command terminated with exit code 1 (some clusters block ping)",
+        "  Output: PING 10.96.172.118 (10.96.172.118) 56(84) bytes of data.\n\n--- 10.96.172.118 ping statistics ---\n3 packets transmitted, 0 received, 100% packet loss, time 2066ms",
+        "✓ HTTP connectivity successful - Status: 200",
+        "  curl -s -o /dev/null -w \"%{http_code}\\n\" http://web",
+        "  Response content: nginx welcome page detected",
+        "✓ Load balancing verified: Load balancing working - 5/5 requests successful",
+        "✓ Cleaned up all test resources"
+      ],
+      "start_time": "2025-07-08T11:41:07-07:00",
+      "end_time": "2025-07-08T11:41:40-07:00",
+      "execution_time_seconds": 33.466118083
+    },
+    {
+      "test_number": 3,
+      "test_name": "Cross-Node Service Connectivity",
+      "description": "Validates kube-proxy inter-node routing by ensuring services work when accessed from pods on different nodes",
+      "status": "PASSED",
+      "success_message": "Cross-node service connectivity validated - kube-proxy inter-node routing confirmed",
+      "details": [
+        "✓ Created nginx deployment 'web-cross' with 2 replicas",
+        "✓ Deployment 'web-cross' is ready",
+        "✓ Nginx pods running on nodes: [mgmt-md-0-px9k6-4xwsc mgmt-md-0-px9k6-89hgx]",
+        "✓ Selected different node 'mgmt-md-0-px9k6-9ck7c' for cross-node test",
+        "✓ Created service 'web-cross'",
+        "✓ Service IP is 10.102.32.204",
+        "✓ Created test pod 'netshoot-cross-node-test' on node 'mgmt-md-0-px9k6-9ck7c'",
+        "✓ Test pod 'netshoot-cross-node-test' is ready on remote node",
+        "✓ Cross-node HTTP connectivity successful - Status: 200",
+        "  Created test pod on remote node with nodeSelector",
+        "  Cross-node response: nginx welcome page detected",
+        "✓ Direct service IP connectivity successful - Status: 200",
+        "  curl http://10.102.32.204 from remote node successful",
+        "  Direct IP response: nginx welcome page detected",
+        "✓ Cleaned up all cross-node test resources"
+      ],
+      "start_time": "2025-07-08T11:41:40-07:00",
+      "end_time": "2025-07-08T11:41:52-07:00",
+      "execution_time_seconds": 12.033293625
+    },
+    {
+      "test_number": 4,
+      "test_name": "DNS Resolution",
+      "description": "Comprehensively validates Kubernetes DNS infrastructure including service discovery, FQDN resolution, and DNS search domains",
+      "status": "FAILED",
+      "error_message": "DNS resolution test failed - check cluster DNS configuration",
+      "details": [
+        "✓ Created nginx deployment 'web-dns' for DNS testing",
+        "✓ Deployment 'web-dns' is ready",
+        "✓ Created service 'web-dns' for DNS testing",
+        "✓ Created DNS test pod 'netshoot-dns-test'",
+        "✓ DNS test pod 'netshoot-dns-test' is ready",
+        "✓ Service FQDN DNS resolution successful",
+        "  Command: nslookup web-dns.mgmt-diagnostic-test.svc.cluster.local",
+        "  Result: ;; Got recursion not available from 10.96.0.10\n;; Got recursion not available from 10.96.0.10\n;; Got recursion not available from 10.96.0.10\n;; Got recursion not available from 10.96.0.10\nServer:\t\t10.96.0.10\nAddress:\t10.96.0.10#53\n\nName:\tweb-dns.mgmt-diagnostic-test.svc.cluster.local\nAddress: 10.111.139.252\n;; Got recursion not available from 10.96.0.10",
+        "✓ Short name DNS resolution successful",
+        "  Command: nslookup web-dns",
+        "  Result: ;; Got recursion not available from 10.96.0.10\nServer:\t\t10.96.0.10\nAddress:\t10.96.0.10#53\n\nName:\tweb-dns.mgmt-diagnostic-test.svc.cluster.local\nAddress: 10.111.139.252\n;; Got recursion not available from 10.96.0.10",
+        "WARNING: Pod-to-pod DNS resolution test inconclusive: pod-to-pod DNS resolution failed",
+        "✓ Cleaned up DNS test resources"
+      ],
+      "start_time": "2025-07-08T11:41:52-07:00",
+      "end_time": "2025-07-08T11:42:00-07:00",
+      "execution_time_seconds": 7.601780958
+    }
+  ],
+  "summary": {
+    "total_tests": 4,
+    "passed": 3,
+    "failed": 1,
+    "overall_status": "FAILED",
+    "total_execution_time_seconds": 90.195785083,
+    "errors_encountered": [
+      "Test 4 (DNS Resolution): DNS resolution test failed - check cluster DNS configuration"
+    ],
+    "completion_time": "2025-07-08T11:42:00-07:00"
+  }
+}
