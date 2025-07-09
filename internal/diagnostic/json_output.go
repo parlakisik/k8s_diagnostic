@@ -53,9 +53,6 @@ type TestResultJSON struct {
 	Placement            string                   `json:"placement,omitempty"`
 	LatencyMs            float64                  `json:"latency_ms,omitempty"`
 	ConnectivityType     string                   `json:"connectivity_type,omitempty"`
-	ServiceType          string                   `json:"service_type,omitempty"`
-	NodePort             int32                    `json:"node_port,omitempty"`
-	ExternalIP           string                   `json:"external_ip,omitempty"`
 }
 
 // ExecutionInfoJSON represents execution metadata
