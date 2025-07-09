@@ -28,59 +28,14 @@ All test resources will be created in the specified namespace (default: diagnost
 		kubeconfig, _ := cmd.Flags().GetString("kubeconfig")
 		namespace, _ := cmd.Flags().GetString("namespace")
 		verbose, _ := cmd.Flags().GetBool("verbose")
-		useExistingPods, _ := cmd.Flags().GetBool("use-existing-pods")
-		targetNamespace, _ := cmd.Flags().GetString("target-namespace")
-		podSelector, _ := cmd.Flags().GetString("pod-selector")
-		interactive, _ := cmd.Flags().GetBool("interactive")
-		autoCreateMissing, _ := cmd.Flags().GetBool("auto-create-missing")
-		preferCrossNode, _ := cmd.Flags().GetBool("prefer-cross-node")
-		showAllPods, _ := cmd.Flags().GetBool("show-all-pods")
+		placement, _ := cmd.Flags().GetString("placement")
 
-		// Create tester early for interactive mode
+		// Create tester
 		ctx := context.Background()
 		tester, err := diagnostic.NewTester(kubeconfig, namespace)
 		if err != nil {
 			fmt.Printf("ERROR: Failed to create diagnostic tester: %v\n", err)
 			return
-		}
-
-		// Handle interactive pod selection mode
-		if interactive {
-			fmt.Printf("🔍 Interactive Pod Discovery Mode\n\n")
-
-			interactiveConfig := diagnostic.InteractiveConfig{
-				TargetNamespace:   targetNamespace,
-				AutoCreateMissing: autoCreateMissing,
-				PreferCrossNode:   preferCrossNode,
-				ShowAllPods:       showAllPods,
-				Verbose:           verbose,
-			}
-
-			selectedConfig, err := tester.InteractivePodSelection(ctx, interactiveConfig)
-			if err != nil {
-				fmt.Printf("ERROR: Interactive pod selection failed: %v\n", err)
-				return
-			}
-
-			// Override test configuration with interactive selection
-			useExistingPods = selectedConfig.UseExistingPods
-			targetNamespace = selectedConfig.TargetNamespace
-			podSelector = selectedConfig.PodSelector
-
-			fmt.Printf("\n📋 Selected Configuration:\n")
-			if selectedConfig.UseExistingPods {
-				fmt.Printf("  - Mode: Using existing pods\n")
-				fmt.Printf("  - Target namespace: %s\n", targetNamespace)
-				fmt.Printf("  - Pod selector: %s\n", podSelector)
-			} else {
-				fmt.Printf("  - Mode: Creating fresh pods\n")
-			}
-			fmt.Printf("\n")
-		} else {
-			// Display configuration if using existing pods mode
-			if useExistingPods {
-				fmt.Printf("NOTE: Using existing pods mode - target namespace: %s, selector: %s\n", targetNamespace, podSelector)
-			}
 		}
 
 		// Record overall start time
@@ -116,10 +71,7 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		// Execute all tests with timing
 		testConfig := diagnostic.TestConfig{
-			UseExistingPods: useExistingPods,
-			TargetNamespace: targetNamespace,
-			PodSelector:     podSelector,
-			CreateFreshPods: !useExistingPods,
+			Placement: placement,
 		}
 
 		executeTimedTestWithConfig(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivityWithConfig, ctx, verbose, testConfig, &timedResults, &testNames)
@@ -349,11 +301,5 @@ func init() {
 	// Local flags for the test command
 	testCmd.Flags().StringP("namespace", "n", "diagnostic-test", "namespace to run diagnostic tests in")
 	testCmd.Flags().String("kubeconfig", "", "path to kubeconfig file (inherits from global flag)")
-	testCmd.Flags().Bool("use-existing-pods", false, "test existing pods instead of creating new ones")
-	testCmd.Flags().String("target-namespace", "default", "namespace to search for existing pods (when using --use-existing-pods)")
-	testCmd.Flags().String("pod-selector", "app=netshoot", "label selector for finding existing pods")
-	testCmd.Flags().Bool("interactive", false, "enable interactive pod discovery and selection")
-	testCmd.Flags().Bool("auto-create-missing", false, "automatically create pods if insufficient for testing")
-	testCmd.Flags().Bool("prefer-cross-node", true, "prioritize pods on different nodes for cross-node testing")
-	testCmd.Flags().Bool("show-all-pods", false, "include non-netshoot pods in discovery (default: only network-capable pods)")
+	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
 }

@@ -50,6 +50,9 @@ type TestResultJSON struct {
 	StartTime            string                   `json:"start_time"`
 	EndTime              string                   `json:"end_time"`
 	ExecutionTimeSeconds float64                  `json:"execution_time_seconds"`
+	Placement            string                   `json:"placement,omitempty"`
+	LatencyMs            float64                  `json:"latency_ms,omitempty"`
+	ConnectivityType     string                   `json:"connectivity_type,omitempty"`
 }
 
 // ExecutionInfoJSON represents execution metadata
