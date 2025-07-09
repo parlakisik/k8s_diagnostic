@@ -1,31 +1,42 @@
-# Binaries
-k8s-diagnostic
-build/k8s-diagnostic
-build/
-
-# Test results (keep the directory but ignore the JSON files)
-test_results/*.json
-
-# Go build cache
+# Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+k8s-diagnostic
 
-# Go test binary, built with `go test -c`
+# Test binary, built with `go test -c`
 *.test
 
-# Go mod download cache
-# go.sum should be committed, so don't ignore it
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
 
 # IDE files
 .vscode/
 .idea/
 
-# OS files
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+
+# Test results and logs
+test_results/*.json
+!test_results/.gitkeep
+
+# Build directory
+build/
 
 # Temporary files
 *.tmp
