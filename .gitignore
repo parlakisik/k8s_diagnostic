@@ -1,0 +1,32 @@
+# Binaries
+k8s-diagnostic
+build/k8s-diagnostic
+build/
+
+# Test results (keep the directory but ignore the JSON files)
+test_results/*.json
+
+# Go build cache
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test binary, built with `go test -c`
+*.test
+
+# Go mod download cache
+# go.sum should be committed, so don't ignore it
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log

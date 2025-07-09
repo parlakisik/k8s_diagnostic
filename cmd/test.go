@@ -10,6 +10,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Test registry - maps test names to their functions
+type TestEntry struct {
+	Name     string
+	Function func(context.Context) diagnostic.TestResult
+}
+
+type TestEntryWithConfig struct {
+	Name     string
+	Function func(context.Context, diagnostic.TestConfig) diagnostic.TestResult
+}
+
+// Available tests registry
+var availableTests = map[string]TestEntry{
+	"pod-to-pod":     {"Pod-to-Pod Connectivity", nil}, // Special handling with config
+	"service-to-pod": {"Service to Pod Connectivity", nil},
+	"cross-node":     {"Cross-Node Service Connectivity", nil},
+	"dns":            {"DNS Resolution", nil},
+	"nodeport":       {"NodePort Service Connectivity", nil},
+	"loadbalancer":   {"LoadBalancer Service Connectivity", nil},
+}
+
+// Default test list when no --test-list is specified
+var defaultTests = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns"}
+
 // testCmd represents the test command
 var testCmd = &cobra.Command{
 	Use:   "test",
@@ -36,8 +60,8 @@ All test resources will be created in the specified namespace (default: diagnost
 		preferCrossNode, _ := cmd.Flags().GetBool("prefer-cross-node")
 		showAllPods, _ := cmd.Flags().GetBool("show-all-pods")
 		placement, _ := cmd.Flags().GetString("placement")
-		includeNodePort, _ := cmd.Flags().GetBool("include-nodeport")
-		includeLoadBalancer, _ := cmd.Flags().GetBool("include-loadbalancer")
+		testAll, _ := cmd.Flags().GetBool("test-all")
+		testList, _ := cmd.Flags().GetStringSlice("test-list")
 
 		// Create tester early for interactive mode
 		ctx := context.Background()
@@ -117,7 +141,21 @@ All test resources will be created in the specified namespace (default: diagnost
 		var timedResults []diagnostic.TimedTestResult
 		var testNames []string
 
-		// Execute all tests with timing
+		// Determine which tests to run
+		testsToRun := defaultTests
+		if testAll {
+			// --test-all flag takes priority: run all available tests
+			testsToRun = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"}
+		} else if len(testList) > 0 {
+			// Handle special case: "all" means run all available tests (backwards compatibility)
+			if len(testList) == 1 && testList[0] == "all" {
+				testsToRun = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"}
+			} else {
+				testsToRun = testList
+			}
+		}
+
+		// Execute tests based on test registry
 		testConfig := diagnostic.TestConfig{
 			UseExistingPods: useExistingPods,
 			TargetNamespace: targetNamespace,
@@ -126,19 +164,30 @@ All test resources will be created in the specified namespace (default: diagnost
 			Placement:       placement,
 		}
 
-		executeTimedTestWithConfig(1, "Pod-to-Pod Connectivity", tester.TestPodToPodConnectivityWithConfig, ctx, verbose, testConfig, &timedResults, &testNames)
-		executeTimedTest(2, "Service to Pod Connectivity", tester.TestServiceToPodConnectivity, ctx, verbose, &timedResults, &testNames)
-		executeTimedTest(3, "Cross-Node Service Connectivity", tester.TestCrossNodeServiceConnectivity, ctx, verbose, &timedResults, &testNames)
-		executeTimedTest(4, "DNS Resolution", tester.TestDNSResolution, ctx, verbose, &timedResults, &testNames)
+		testNum := 1
+		for _, testName := range testsToRun {
+			testEntry, exists := availableTests[testName]
+			if !exists {
+				fmt.Printf("WARNING: Unknown test '%s' - skipping\n", testName)
+				continue
+			}
 
-		// Conditional tests based on flags
-		testNum := 5
-		if includeNodePort {
-			executeTimedTest(testNum, "NodePort Service Connectivity", tester.TestNodePortServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			// Special handling for tests that require config
+			switch testName {
+			case "pod-to-pod":
+				executeTimedTestWithConfig(testNum, testEntry.Name, tester.TestPodToPodConnectivityWithConfig, ctx, verbose, testConfig, &timedResults, &testNames)
+			case "service-to-pod":
+				executeTimedTest(testNum, testEntry.Name, tester.TestServiceToPodConnectivity, ctx, verbose, &timedResults, &testNames)
+			case "cross-node":
+				executeTimedTest(testNum, testEntry.Name, tester.TestCrossNodeServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			case "dns":
+				executeTimedTest(testNum, testEntry.Name, tester.TestDNSResolution, ctx, verbose, &timedResults, &testNames)
+			case "nodeport":
+				executeTimedTest(testNum, testEntry.Name, tester.TestNodePortServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			case "loadbalancer":
+				executeTimedTest(testNum, testEntry.Name, tester.TestLoadBalancerServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			}
 			testNum++
-		}
-		if includeLoadBalancer {
-			executeTimedTest(testNum, "LoadBalancer Service Connectivity", tester.TestLoadBalancerServiceConnectivity, ctx, verbose, &timedResults, &testNames)
 		}
 
 		// Record overall end time
@@ -371,6 +420,6 @@ func init() {
 	testCmd.Flags().Bool("prefer-cross-node", true, "prioritize pods on different nodes for cross-node testing")
 	testCmd.Flags().Bool("show-all-pods", false, "include non-netshoot pods in discovery (default: only network-capable pods)")
 	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
-	testCmd.Flags().Bool("include-nodeport", false, "include NodePort service connectivity tests")
-	testCmd.Flags().Bool("include-loadbalancer", false, "include LoadBalancer service connectivity tests")
+	testCmd.Flags().Bool("test-all", false, "run all available tests")
+	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer (default: pod-to-pod,service-to-pod,cross-node,dns)")
 }
