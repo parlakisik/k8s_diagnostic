@@ -33,6 +33,7 @@ Thumbs.db
 
 # Test results and logs
 test_results/*.json
+test_results/logs/
 !test_results/.gitkeep
 
 # Build directory

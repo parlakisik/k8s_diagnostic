@@ -3,12 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s-diagnostic/internal/diagnostic"
 
 	"github.com/spf13/cobra"
 )
+
+// Global logger instance
+var logger *diagnostic.Logger
 
 // Test registry - maps test names to their functions
 type TestEntry struct {
@@ -31,20 +35,33 @@ var availableTests = map[string]TestEntry{
 	"loadbalancer":   {"LoadBalancer Service Connectivity", nil},
 }
 
-// Default test list when no --test-list is specified
-var defaultTests = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns"}
+// Test groups for logical organization
+var testGroups = map[string][]string{
+	"networking": {"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"},
+	// Future groups will be added here, e.g.:
+	// "firewall": {"ingress-policy", "egress-policy"},
+	// "storage": {"pv-binding", "pvc-access"},
+}
+
+// Default test list when no --test-list or --test-group is specified
+var defaultTests = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"}
 
 // testCmd represents the test command
 var testCmd = &cobra.Command{
 	Use:   "test",
 	Short: "Run diagnostic tests in Kubernetes cluster",
-	Long: `Run comprehensive connectivity diagnostic tests within a Kubernetes cluster.
+	Long: `Run comprehensive diagnostic tests within a Kubernetes cluster.
 
-Tests include:
+Available test groups:
+- networking: All network connectivity tests
+
+Networking tests include:
 - Pod-to-Pod Connectivity: Creates two netshoot pods on different worker nodes and tests ping connectivity
 - Service-to-Pod Connectivity: Creates nginx deployment + service and tests HTTP connectivity and load balancing
 - Cross-Node Service Connectivity: Tests service connectivity from a remote node to validate kube-proxy inter-node routing
 - DNS Resolution: Tests service DNS resolution including FQDN, short names, and pod-to-pod DNS
+- NodePort Service Connectivity: Tests external access to services through node ports
+- LoadBalancer Service Connectivity: Tests LoadBalancer service functionality
 
 The tool will use the current kubectl context unless --kubeconfig is specified.
 All test resources will be created in the specified namespace (default: diagnostic-test).`,
@@ -53,16 +70,43 @@ All test resources will be created in the specified namespace (default: diagnost
 		namespace, _ := cmd.Flags().GetString("namespace")
 		verbose, _ := cmd.Flags().GetBool("verbose")
 		placement, _ := cmd.Flags().GetString("placement")
-		testAll, _ := cmd.Flags().GetBool("test-all")
 		testList, _ := cmd.Flags().GetStringSlice("test-list")
+		testGroup, _ := cmd.Flags().GetString("test-group")
+
+		// Initialize logger with debug level when verbose mode is enabled
+		var err error
+		if verbose {
+			logger, err = diagnostic.NewLoggerWithLevel(true, diagnostic.DEBUG) // true = console output enabled
+		} else {
+			logger, err = diagnostic.NewLoggerWithLevel(true, diagnostic.INFO)
+		}
+
+		if err != nil {
+			fmt.Printf("ERROR: Failed to initialize logger: %v\n", err)
+			return
+		}
+		defer logger.Close()
+
+		logger.LogInfo("Starting Kubernetes connectivity diagnostic tests")
+		logger.LogInfo("Configuration: namespace=%s, verbose=%t", namespace, verbose)
+		if testGroup != "" {
+			logger.LogInfo("Using test group: %s", testGroup)
+		}
+		if kubeconfig != "" {
+			logger.LogInfo("Using kubeconfig file: %s", kubeconfig)
+		} else {
+			logger.LogInfo("Using default kubectl context")
+		}
 
 		// Create tester
 		ctx := context.Background()
+		logger.LogDebug("Creating diagnostic tester with kubeconfig: %s, namespace: %s", kubeconfig, namespace)
 		tester, err := diagnostic.NewTester(kubeconfig, namespace)
 		if err != nil {
-			fmt.Printf("ERROR: Failed to create diagnostic tester: %v\n", err)
+			logger.LogError("Failed to create diagnostic tester: %v", err)
 			return
 		}
+		logger.LogDebug("Tester created successfully")
 
 		// Record overall start time
 		overallStartTime := time.Now()
@@ -81,15 +125,15 @@ All test resources will be created in the specified namespace (default: diagnost
 		fmt.Printf("Running connectivity diagnostic tests in namespace '%s'\n\n", namespace)
 
 		// Create namespace before running tests
-		fmt.Printf("Setting up test environment...\n")
+		fmt.Printf("🔍 Setting up test environment...\n")
 		if err := tester.EnsureNamespace(ctx); err != nil {
 			fmt.Printf("ERROR: Failed to create namespace %s: %v\n", namespace, err)
 			return
 		}
-		fmt.Printf("Namespace %s ready\n\n", namespace)
+		fmt.Printf("✅ Namespace %s ready\n\n", namespace)
 
 		// Run all diagnostic tests
-		fmt.Printf("Running diagnostic tests...\n")
+		fmt.Printf("🧪 Running diagnostic tests...\n")
 
 		// Store timed test results for JSON output
 		var timedResults []diagnostic.TimedTestResult
@@ -97,13 +141,20 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		// Determine which tests to run
 		testsToRun := defaultTests
-		if testAll {
-			// --test-all flag takes priority: run all available tests
-			testsToRun = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"}
+
+		// Check for test group first
+		if testGroup != "" {
+			if group, exists := testGroups[testGroup]; exists {
+				testsToRun = group
+				logger.LogInfo("Running tests in group: %s", testGroup)
+			} else {
+				fmt.Printf("WARNING: Unknown test group '%s' - using defaults\n", testGroup)
+				logger.LogWarning("Unknown test group '%s' - using defaults", testGroup)
+			}
 		} else if len(testList) > 0 {
 			// Handle special case: "all" means run all available tests (backwards compatibility)
 			if len(testList) == 1 && testList[0] == "all" {
-				testsToRun = []string{"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"}
+				testsToRun = defaultTests
 			} else {
 				testsToRun = testList
 			}
@@ -198,20 +249,29 @@ All test resources will be created in the specified namespace (default: diagnost
 		keepNamespace, _ := cmd.Flags().GetBool("keep-namespace")
 
 		// Determine if we should clean up the namespace
-		// - Only clean up if running all tests AND not explicitly keeping namespace
-		// - For selective tests, always keep namespace by default
-		shouldCleanup := testAll && !keepNamespace
+		// - Only clean up if running all default tests AND not explicitly keeping namespace
+		// - For selective tests or specific groups, always keep namespace by default
+		isRunningAllTests := len(testsToRun) == len(defaultTests)
+		for i, test := range testsToRun {
+			if i >= len(defaultTests) || test != defaultTests[i] {
+				isRunningAllTests = false
+				break
+			}
+		}
+		shouldCleanup := isRunningAllTests && !keepNamespace
 
 		if shouldCleanup {
 			// Clean up namespace after tests
-			fmt.Printf("\nCleaning up test environment...\n")
+			logger.LogInfo("\n🧹 Cleaning up test environment...")
+			logger.SetContext("Cleanup")
 			if err := tester.CleanupNamespace(ctx); err != nil {
-				fmt.Printf("WARNING: Failed to cleanup namespace %s: %v\n", namespace, err)
+				logger.LogWarning("Failed to cleanup namespace %s: %v", namespace, err)
 			} else {
-				fmt.Printf("Namespace %s cleaned up\n", namespace)
+				logger.LogInfo("Namespace %s cleaned up", namespace)
 			}
+			logger.ClearContext()
 		} else {
-			fmt.Printf("\nKeeping namespace %s for future test runs\n", namespace)
+			fmt.Printf("\n📝 Keeping namespace %s for future test runs\n", namespace)
 			fmt.Printf("To delete the namespace manually: kubectl delete namespace %s\n", namespace)
 		}
 
@@ -231,33 +291,37 @@ All test resources will be created in the specified namespace (default: diagnost
 			overallEndTime,
 		)
 
+		// Add log file information to the JSON report
+		jsonReport.ExecutionInfo.LogFile = logger.GetLogFilename()
+
+		// Save the JSON report
 		if err := diagnostic.SaveJSONReport(&jsonReport); err != nil {
-			fmt.Printf("WARNING: Failed to save JSON report: %v\n", err)
+			logger.LogWarning("Failed to save JSON report: %v", err)
 		} else {
-			fmt.Printf("JSON report saved: test_results/%s\n", jsonReport.ExecutionInfo.Filename)
+			logger.LogInfo("JSON report saved: test_results/%s", jsonReport.ExecutionInfo.Filename)
 		}
 
 		// Display test summary
-		fmt.Printf("\nTest Summary:\n")
+		fmt.Printf("\n📊 Test Summary:\n")
 		fmt.Printf("  Total Tests: %d, Passed: %d, Failed: %d\n", totalTests, passedTests, failedTests)
 
 		if len(passedTestNames) > 0 {
-			fmt.Printf("  Passed Tests:\n")
+			fmt.Printf("  ✅ Passed Tests:\n")
 			for _, testName := range passedTestNames {
-				fmt.Printf("    ✓ %s\n", testName)
+				fmt.Printf("    ✅ %s\n", testName)
 			}
 		}
 
 		if len(failedTestNames) > 0 {
-			fmt.Printf("  Failed Tests:\n")
+			fmt.Printf("  ❌ Failed Tests:\n")
 			for _, testName := range failedTestNames {
-				fmt.Printf("    ✗ %s\n", testName)
+				fmt.Printf("    ❌ %s\n", testName)
 			}
 		}
 
 		// Display detailed results in verbose mode
 		if verbose {
-			fmt.Printf("\nDetailed Test Results:\n")
+			fmt.Printf("\n📋 Detailed Test Results:\n")
 			for _, detail := range result.Details {
 				fmt.Printf("  %s\n", detail)
 			}
@@ -266,14 +330,14 @@ All test resources will be created in the specified namespace (default: diagnost
 		// Display final result
 		fmt.Printf("\n")
 		if result.Success {
-			fmt.Printf("✓ Overall Result: %s\n", result.Message)
+			fmt.Printf("🎉 Overall Result: %s\n", result.Message)
 			if !verbose && len(result.Details) > 0 {
-				fmt.Printf("Run with --verbose for detailed test steps\n")
+				fmt.Printf("💡 Run with --verbose for detailed test steps\n")
 			}
 		} else {
-			fmt.Printf("✗ Overall Result: %s\n", result.Message)
+			fmt.Printf("🛑 Overall Result: %s\n", result.Message)
 			if !verbose && len(result.Details) > 0 {
-				fmt.Printf("Individual Test Results:\n")
+				fmt.Printf("📋 Individual Test Results:\n")
 				for _, detail := range result.Details {
 					fmt.Printf("  %s\n", detail)
 				}
@@ -281,92 +345,163 @@ All test resources will be created in the specified namespace (default: diagnost
 		}
 
 		// Final reminder about JSON file availability
-		fmt.Printf("\nDetailed results are stored in JSON file in the test_results/ folder for further analysis\n")
+		fmt.Printf("\n📁 Detailed results are stored in JSON file in the test_results/ folder for further analysis\n")
 	},
+}
+
+// executeTimedTestUnified is a unified helper function that captures timing information for tests with or without config
+func executeTimedTestUnified(
+	testNum int,
+	testName string,
+	ctx context.Context,
+	verbose bool,
+	timedResults *[]diagnostic.TimedTestResult,
+	testNames *[]string,
+	execute func() diagnostic.TestResult,
+	logStartMessage string,
+) {
+	// Select emoji based on test name
+	var testEmoji string
+	switch {
+	case strings.Contains(testName, "Pod-to-Pod"):
+		testEmoji = "🔄"
+	case strings.Contains(testName, "Service to Pod"):
+		testEmoji = "🌐"
+	case strings.Contains(testName, "Cross-Node"):
+		testEmoji = "📡"
+	case strings.Contains(testName, "DNS"):
+		testEmoji = "🔤"
+	case strings.Contains(testName, "NodePort"):
+		testEmoji = "🚪"
+	case strings.Contains(testName, "LoadBalancer"):
+		testEmoji = "⚖️"
+	default:
+		testEmoji = "🧪"
+	}
+	fmt.Printf("Test %d: %s %s\n", testNum, testEmoji, testName)
+
+	// Set test context in logger
+	testContext := fmt.Sprintf("Test %d: %s", testNum, testName)
+	logger.SetContext(testContext)
+
+	// Log start message
+	logger.LogInfo("%s", logStartMessage)
+
+	// Capture start time
+	startTime := time.Now()
+
+	// Execute test function
+	logger.LogDebug("Executing test function")
+	result := execute()
+
+	// Capture end time
+	endTime := time.Now()
+	executionTime := endTime.Sub(startTime)
+	logger.LogInfo("Test completed in %.2f seconds", executionTime.Seconds())
+
+	// Log test result details
+	if result.Success {
+		logger.LogInfo("Test PASSED: %s", result.Message)
+	} else {
+		logger.LogError("Test FAILED: %s", result.Message)
+	}
+
+	// Log detailed results
+	for _, detail := range result.Details {
+		logger.LogDebug("Detail: %s", detail)
+	}
+
+	// Log diagnostic info if available
+	if result.DetailedDiagnostics != nil {
+		if result.DetailedDiagnostics.FailureStage != "" {
+			logger.LogWarning("Failure stage: %s", result.DetailedDiagnostics.FailureStage)
+		}
+		if result.DetailedDiagnostics.TechnicalError != "" {
+			logger.LogError("Technical error: %s", result.DetailedDiagnostics.TechnicalError)
+		}
+
+		// Log command outputs
+		for _, cmd := range result.DetailedDiagnostics.CommandOutputs {
+			logger.CaptureCommandOutput(cmd)
+		}
+
+		// Log network context if available
+		if result.DetailedDiagnostics.NetworkContext != nil {
+			netContext := result.DetailedDiagnostics.NetworkContext
+			logger.LogDebug("Network context: source=%s, target=%s",
+				netContext.SourcePodIP, netContext.TargetPodIP)
+		}
+
+		// Log troubleshooting hints
+		for _, hint := range result.DetailedDiagnostics.TroubleshootingHints {
+			logger.LogInfo("Troubleshooting hint: %s", hint)
+		}
+	}
+
+	// Create timed result
+	timedResult := diagnostic.TimedTestResult{
+		TestResult: result,
+		StartTime:  startTime,
+		EndTime:    endTime,
+	}
+
+	*timedResults = append(*timedResults, timedResult)
+	*testNames = append(*testNames, testName)
+
+	// Display result
+	if result.Success {
+		fmt.Printf("✅ Test %d PASSED: %s\n", testNum, result.Message)
+	} else {
+		fmt.Printf("❌ Test %d FAILED: %s\n", testNum, result.Message)
+	}
+
+	// Show verbose details if enabled
+	if verbose && len(result.Details) > 0 {
+		fmt.Printf("  Details:\n")
+		for _, detail := range result.Details {
+			fmt.Printf("    %s\n", detail)
+		}
+	}
+	fmt.Printf("\n")
+
+	// Clear test context
+	logger.ClearContext()
 }
 
 // executeTimedTestWithConfig is a helper function that captures timing information for tests that need configuration
 func executeTimedTestWithConfig(testNum int, testName string, testFunc func(context.Context, diagnostic.TestConfig) diagnostic.TestResult,
 	ctx context.Context, verbose bool, config diagnostic.TestConfig, timedResults *[]diagnostic.TimedTestResult, testNames *[]string) {
 
-	fmt.Printf("Test %d: %s\n", testNum, testName)
-
-	// Capture start time
-	startTime := time.Now()
-
-	// Execute test with config
-	result := testFunc(ctx, config)
-
-	// Capture end time
-	endTime := time.Now()
-
-	// Create timed result
-	timedResult := diagnostic.TimedTestResult{
-		TestResult: result,
-		StartTime:  startTime,
-		EndTime:    endTime,
-	}
-
-	*timedResults = append(*timedResults, timedResult)
-	*testNames = append(*testNames, testName)
-
-	// Display result
-	if result.Success {
-		fmt.Printf("✓ Test %d PASSED: %s\n", testNum, result.Message)
-	} else {
-		fmt.Printf("✗ Test %d FAILED: %s\n", testNum, result.Message)
-	}
-
-	// Show verbose details if enabled
-	if verbose && len(result.Details) > 0 {
-		fmt.Printf("  Details:\n")
-		for _, detail := range result.Details {
-			fmt.Printf("    %s\n", detail)
-		}
-	}
-	fmt.Printf("\n")
+	executeTimedTestUnified(
+		testNum,
+		testName,
+		ctx,
+		verbose,
+		timedResults,
+		testNames,
+		func() diagnostic.TestResult {
+			return testFunc(ctx, config)
+		},
+		fmt.Sprintf("Starting test with configuration: %+v", config),
+	)
 }
 
 // executeTimedTest is a helper function that captures timing information for each test
 func executeTimedTest(testNum int, testName string, testFunc func(context.Context) diagnostic.TestResult,
 	ctx context.Context, verbose bool, timedResults *[]diagnostic.TimedTestResult, testNames *[]string) {
 
-	fmt.Printf("Test %d: %s\n", testNum, testName)
-
-	// Capture start time
-	startTime := time.Now()
-
-	// Execute test
-	result := testFunc(ctx)
-
-	// Capture end time
-	endTime := time.Now()
-
-	// Create timed result
-	timedResult := diagnostic.TimedTestResult{
-		TestResult: result,
-		StartTime:  startTime,
-		EndTime:    endTime,
-	}
-
-	*timedResults = append(*timedResults, timedResult)
-	*testNames = append(*testNames, testName)
-
-	// Display result
-	if result.Success {
-		fmt.Printf("✓ Test %d PASSED: %s\n", testNum, result.Message)
-	} else {
-		fmt.Printf("✗ Test %d FAILED: %s\n", testNum, result.Message)
-	}
-
-	// Show verbose details if enabled
-	if verbose && len(result.Details) > 0 {
-		fmt.Printf("  Details:\n")
-		for _, detail := range result.Details {
-			fmt.Printf("    %s\n", detail)
-		}
-	}
-	fmt.Printf("\n")
+	executeTimedTestUnified(
+		testNum,
+		testName,
+		ctx,
+		verbose,
+		timedResults,
+		testNames,
+		func() diagnostic.TestResult {
+			return testFunc(ctx)
+		},
+		"Starting test",
+	)
 }
 
 func init() {
@@ -376,7 +511,7 @@ func init() {
 	testCmd.Flags().StringP("namespace", "n", "diagnostic-test", "namespace to run diagnostic tests in")
 	testCmd.Flags().String("kubeconfig", "", "path to kubeconfig file (inherits from global flag)")
 	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
-	testCmd.Flags().Bool("test-all", false, "run all available tests")
+	testCmd.Flags().String("test-group", "", "run tests by group: networking (more groups coming soon)")
 	testCmd.Flags().Bool("keep-namespace", false, "keep the test namespace after tests complete (useful for running multiple test sequences)")
-	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer (default: pod-to-pod,service-to-pod,cross-node,dns)")
+	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer")
 }
