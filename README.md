@@ -1,37 +1,25 @@
 # k8s-diagnostic
 
-A CLI tool for testing network connectivity within Kubernetes clusters using real pod-to-pod communication tests.
+A CLI tool for testing network connectivity within Kubernetes clusters using real pod-to-pod communication tests with enhanced visual feedback and comprehensive logging.
+
+## **Latest Enhancements**
+
+Recent updates have significantly improved the user experience and diagnostic capabilities:
+
+- **📊 Enhanced Logging System**: Multi-level logging (DEBUG, INFO, WARNING, ERROR) with colored output and comprehensive log files
+- **📝 Detailed Diagnostics**: Improved error reporting with context-aware logging and file/line tracking
+- **📁 Structured Logs**: All terminal output captured in timestamped log files for later analysis
 
 ## **Main Branch - Core Foundation**
 
 This is the **main/base branch** containing the foundational 4 connectivity tests that form the core of k8s-diagnostic. This branch provides reliable, battle-tested network diagnostics for any Kubernetes cluster.
 
-### **Available Feature Branches:**
-
-Explore enhanced versions with specialized capabilities:
-
-- **[feature/nodeport-loadbalancer-service-tests](../../tree/feature/nodeport-loadbalancer-service-tests)** - **FLAGSHIP** 
-  - ✓ External service testing (NodePort/LoadBalancer)
-  - ✓ 5 total tests (adds external access validation)
-  - ✓ Production-grade service exposure testing
-
-- **[feature/existing-pods-support](../../tree/feature/existing-pods-support)**
-  - ✓ Interactive pod discovery and selection
-  - ✓ Test existing workloads instead of creating new pods
-  - ✓ Production-safe testing with zero additional resources
-
-- **[feature/same-node-pod-placement](../../tree/feature/same-node-pod-placement)**
-  - ✓ Advanced pod placement control (same-node/cross-node/both)
-  - ✓ Performance comparison and targeted testing
-  - ✓ Network topology validation
-
-- **[feat/service-connectivity-tests](../../tree/feat/service-connectivity-tests)**
-  - ✓ Enhanced UI with clean visual indicators
-  - ✓ Professional presentation for demos and training
-  - ✓ Screenshot-ready output
 
 ### **Core Features (This Branch):**
 - **6 Comprehensive Tests**: Pod-to-Pod, Service-to-Pod, Cross-Node Service, DNS Resolution, NodePort Service, LoadBalancer Service
+- **Enhanced Visual Output**: Emoji-based UI for clearer, more engaging test results 🎨
+- **Comprehensive Logging**: Multi-level logging with DEBUG, INFO, WARNING, ERROR levels
+- **Log File Generation**: All output captured in timestamped log files for debugging
 - **Production Ready**: Stable, reliable connectivity testing
 - **Educational Output**: Detailed explanations and equivalent kubectl commands
 - **JSON Reporting**: Structured results for automation and monitoring
@@ -44,6 +32,98 @@ This project provides:
 - **`build_test_k8s.sh`** - Script to create a test Kubernetes cluster using kind with Cilium CNI
 - **`delete_test_k8s.sh`** - Script to delete test clusters
 - **`k8s-diagnostic`** - CLI tool for running comprehensive diagnostic tests in any Kubernetes cluster
+
+## New User Guide: Getting Started
+
+This step-by-step guide will help you get started with k8s-diagnostic from scratch. Follow these instructions to set up your environment, run diagnostics, and understand the results.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+- Docker (running)
+- kind (Kubernetes in Docker)
+- kubectl
+- helm
+- Go 1.21+ (for building from source)
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/parlakisik/k8s_diagnostic.git
+cd k8s_diagnostic
+```
+
+### Step 2: Create a Test Kubernetes Cluster
+
+```bash
+# Create a 3-node kind cluster with Cilium CNI
+./build_test_k8s.sh
+
+# Verify your cluster is running
+kubectl get nodes
+```
+
+This creates a Kubernetes cluster with 1 control-plane and 2 worker nodes, running the Cilium CNI.
+
+### Step 3: Build the Diagnostic Tool
+
+```bash
+# Build using Make
+make build
+
+# Verify the binary was created
+ls -la build/k8s-diagnostic
+```
+
+### Step 4: Run the Network Diagnostics
+
+```bash
+# Run all network tests with verbose output
+./build/k8s-diagnostic test --test-group networking --verbose
+```
+
+This will:
+1. Create a `diagnostic-test` namespace
+2. Run 6 comprehensive network connectivity tests
+3. Generate detailed logs and a JSON report
+4. Clean up resources automatically
+
+### Step 5: Understanding the Results
+
+After running the tests, you'll see:
+- A summary of all test results with pass/fail status
+- Detailed steps that were performed (in verbose mode)
+- Path to the JSON report for further analysis
+
+Example successful output will look like:
+```
+📊 Test Summary:
+  Total Tests: 6, Passed: 6, Failed: 0
+  ✅ Passed Tests:
+    ✅ Pod-to-Pod Connectivity
+    ✅ Service to Pod Connectivity
+    ✅ Cross-Node Service Connectivity
+    ✅ DNS Resolution
+    ✅ NodePort Service Connectivity
+    ✅ LoadBalancer Service Connectivity
+
+🎉 Overall Result: All 6 diagnostic tests passed
+```
+
+### Step 6: Cleaning Up
+
+When you're done testing, clean up your resources:
+
+```bash
+# Delete the test Kubernetes cluster
+./delete_test_k8s.sh -f
+```
+
+### Next Steps
+
+- Try running individual tests with `--test-list pod-to-pod,dns`
+- Test against your production cluster by pointing to your kubeconfig
+- Review the JSON reports in `test_results/` for detailed analysis
 
 ## Features
 
@@ -235,7 +315,7 @@ This project provides:
 
 ### Test 4: DNS Resolution
 
-**Purpose:** Comprehensively validates Kubernetes DNS infrastructure including service discovery, FQDN resolution, DNS search domains, and pod-to-pod DNS.
+**Purpose:** Validates Kubernetes DNS infrastructure by testing service FQDN resolution.
 
 **Step-by-Step Process:**
 
@@ -248,43 +328,20 @@ This project provides:
    - Constructs FQDN: `"web-dns.diagnostic-test.svc.cluster.local"`
    - Format: `[service].[namespace].svc.cluster.local`
    - Runs: `nslookup web-dns.diagnostic-test.svc.cluster.local`
-   - **Success criteria:** Response contains both "Name:" and "Address:" fields
    - Shows actual nslookup output for verification
+   - **Success criteria:** Command completes without errors and returns the service IP
 
-3. **Test Short Name Resolution**
-   - Uses just service name: `"web-dns"`
-   - Runs: `nslookup web-dns`
-   - Relies on Kubernetes DNS search domains in `/etc/resolv.conf`
-   - Tests DNS search domain configuration
-   - Shows actual resolution output
-
-4. **Test Pod-to-Pod DNS Resolution**
-   - Gets one nginx pod IP from web-dns deployment
-   - Runs reverse lookup: `nslookup [pod_IP]`
-   - Tests whether pod IPs can be resolved via DNS
-   - Often inconclusive but provides additional DNS validation
-
-5. **Determine Overall Success**
-   - **Primary criteria:** Pod-to-pod DNS test must succeed AND short name resolution must return results
-   - **Success condition:** `(pod-to-pod DNS err == nil) && (shortResult != "")`
-   - **Success message:** "DNS resolution test passed - service FQDN and short name resolution working"
-   - **Failure message:** "DNS resolution test failed - check cluster DNS configuration"
-   - **Note:** Current implementation has a bug where FQDN success isn't properly tracked in final determination
+3. **Cleanup and Analyze Results**
+   - Deletes deployment, service, and test pod
+   - Reports: "✓ Cleaned up DNS test resources"
+   - **Success message:** "DNS resolution test completed"
 
 **What This Validates:**
 - CoreDNS/kube-dns functionality
 - Service discovery via DNS
 - FQDN resolution (full kubernetes DNS names)
-- DNS search domains (short names resolve)
-- DNS configuration (`/etc/resolv.conf` setup)
-- Pod DNS functionality
+- DNS configuration in the cluster
 
-**Common Issues Detected:**
-- CoreDNS not running or misconfigured
-- DNS service not accessible from pods
-- Search domain misconfiguration
-- Network policies blocking DNS traffic
-- DNS service discovery broken
 
 ---
 
@@ -467,152 +524,6 @@ make install
 ./k8s-diagnostic test --kubeconfig /path/to/kubeconfig
 ```
 
-## Interactive Pod Selection
-
-The k8s-diagnostic tool now supports **Interactive Pod Discovery & Selection**, allowing you to test connectivity using existing pods in your cluster instead of creating new ones.
-
-### Smart Pod Discovery
-
-The tool can intelligently discover and score existing pods in your cluster:
-
-```bash
-# Interactive mode - discover and select pods
-./k8s-diagnostic test --interactive --target-namespace default
-
-# Example output:
-Interactive Pod Discovery Mode
-
-Discovering pods in namespace 'default'...
-
-Discovered Pods:
-[1] netshoot-1 (Running) on worker-node-1 - IP: 192.168.1.10 [netshoot]
-[2] netshoot-2 (Running) on worker-node-2 - IP: 192.168.1.20 [netshoot]  
-[3] debug-pod (Running) on worker-node-1 - IP: 192.168.1.30 [network-capable]
-
-Recommendation: Pods 1 and 2 for cross-node testing
-
-Select pods for testing (e.g., 1,2 or just press Enter for recommended): 1,2
-
-Selected Configuration:
-  - Mode: Using existing pods
-  - Target namespace: default
-  - Pod selector: app=netshoot
-```
-
-### New CLI Flags
-
-#### Interactive Mode Flags
-```bash
---interactive                 # Enable interactive pod discovery and selection
---auto-create-missing        # Automatically create pods if insufficient for testing  
---prefer-cross-node          # Prioritize pods on different nodes (default: true)
---show-all-pods              # Include non-netshoot pods in discovery
-```
-
-#### Existing Pods Mode Flags  
-```bash
---use-existing-pods          # Test existing pods instead of creating new ones
---target-namespace string    # Namespace to search for existing pods (default: "default")
---pod-selector string        # Label selector for finding existing pods (default: "app=netshoot")
-```
-
-### Key Features
-
-**Smart Pod Scoring:**
-- **Netshoot pods** get highest priority (automatic detection)
-- **Network-capable images** (busybox, alpine, ubuntu) get medium priority  
-- **Ready pods** get bonus points
-- **Long-running pods** (sleep commands) get preference
-
-**Cross-Node Optimization:**
-- Automatically detects pods on different nodes
-- Prioritizes cross-node pairs for optimal testing
-- Shows node information in discovery interface
-
-**Intelligent Fallbacks:**
-- **No pods found** → Offers to create fresh pods
-- **Insufficient pods** → Offers to create additional pods  
-- **Auto-create mode** → Seamless fallback without user prompts
-
-### Usage Examples
-
-#### Basic Interactive Mode
-```bash
-# Discover pods and interactively select
-./k8s-diagnostic test --interactive --target-namespace production
-
-# Auto-create missing pods (no prompts)  
-./k8s-diagnostic test --interactive --auto-create-missing
-
-# Show all pods, not just network-capable ones
-./k8s-diagnostic test --interactive --show-all-pods
-```
-
-#### Direct Existing Pods Mode
-```bash
-# Test existing netshoot pods in default namespace
-./k8s-diagnostic test --use-existing-pods
-
-# Test existing pods with custom selector
-./k8s-diagnostic test --use-existing-pods --pod-selector "app=debug-tools"
-
-# Test existing pods in specific namespace
-./k8s-diagnostic test --use-existing-pods --target-namespace kube-system --pod-selector "app=network-test"
-```
-
-#### Combined with Other Flags
-```bash
-# Interactive mode with verbose output and custom kubeconfig
-./k8s-diagnostic test --interactive --verbose --kubeconfig ~/.kube/prod-config
-
-# Existing pods mode with custom test namespace
-./k8s-diagnostic test --use-existing-pods --namespace custom-diagnostic-ns --verbose
-```
-
-### Behavior Differences
-
-**Traditional Mode (Default):**
-- Creates fresh `netshoot-test-1` and `netshoot-test-2` pods
-- Uses `diagnostic-test` namespace (or custom via `--namespace`)
-- Deleting external pods has **no effect** on tests
-- Always gets consistent, clean test environment
-
-**Existing Pods Mode:**
-- Uses your existing pods from specified namespace
-- Discovers pods with intelligent scoring and recommendations
-- Deleting pods **actually breaks the tests** (validates real pod dependencies!)
-- Tests real-world scenarios with your actual cluster state
-
-**Interactive Mode:**
-- Combines discovery with user choice
-- Visual interface with pod scoring indicators
-- Smart recommendations for optimal testing
-- Graceful fallbacks when insufficient pods available
-
-### Perfect For
-
-**Development & Debugging:**
-- Test connectivity between your actual application pods
-- Validate network policies with real workloads  
-- Debug cross-node issues with existing deployments
-
-**CI/CD Integration:**
-- Auto-create mode for automated pipelines
-- Test connectivity of newly deployed applications
-- Validate multi-namespace networking
-
-**Production Validation:**
-- Test connectivity without creating additional resources
-- Use existing monitoring/debug pods for network validation
-- Validate service mesh functionality with real workloads
-
-### Important Notes
-
-- **Pod Requirements:** Existing pods must have network debugging tools (netshoot, busybox, alpine, etc.)
-- **Cross-Node Testing:** Tool automatically selects pods on different nodes when possible
-- **Graceful Degradation:** Falls back to same-node testing if cross-node pods unavailable
-- **Resource Safety:** Never modifies or deletes your existing pods
-- **Namespace Isolation:** Diagnostic resources still created in separate test namespace
 
 ---
 
@@ -647,15 +558,15 @@ OPTIONS:
 ### CLI Tool Options
 
 ```bash
-./k8s-connectivity test [OPTIONS]
+./k8s-diagnostic test [OPTIONS]
 
 OPTIONS:
     -n, --namespace string    Namespace to run tests in (default: "diagnostic-test")
     --kubeconfig string       Path to kubeconfig file
-    -v, --verbose            Verbose output with detailed test steps
-    --test-all               Run all available tests
-    --test-list string       Comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer
-    --keep-namespace         Keep the test namespace after tests complete (useful for running multiple test sequences)
+    -v, --verbose             Verbose output with detailed test steps and DEBUG level logs
+    --test-group string       Run tests by group: networking (more groups coming soon)
+    --test-list string        Comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer
+    --keep-namespace          Keep the test namespace after tests complete (useful for running multiple test sequences)
     
 Global Options:
     --config string          Config file (default: $HOME/.k8s-diagnostic.yaml)
@@ -666,8 +577,8 @@ Global Options:
 The tool includes intelligent namespace management to improve testing efficiency:
 
 **Default Behavior:**
-- When running **selective tests** (--test-list or default subset): The namespace is **preserved** after tests complete
-- When running **all tests** (--test-all): The namespace is **cleaned up** after tests complete
+- When running **selective tests** (--test-list with subset of tests): The namespace is **preserved** after tests complete
+- When running **all tests** (default or --test-group networking): The namespace is **cleaned up** after tests complete
 
 **Override Options:**
 - `--keep-namespace`: Forces namespace preservation regardless of test mode
@@ -688,10 +599,10 @@ The tool includes intelligent namespace management to improve testing efficiency
 ./k8s-diagnostic test --test-list nodeport
 
 # Run all tests - namespace automatically cleaned up
-./k8s-diagnostic test --test-all
+./k8s-diagnostic test --test-group networking
 
-# Force namespace preservation even with --test-all
-./k8s-diagnostic test --test-all --keep-namespace
+# Force namespace preservation even with all tests
+./k8s-diagnostic test --test-group networking --keep-namespace
 
 # Manual cleanup when done testing
 kubectl delete namespace diagnostic-test
@@ -703,46 +614,46 @@ kubectl delete namespace diagnostic-test
 ```
 Running connectivity diagnostic tests in namespace 'diagnostic-test'
 
-Setting up test environment...
-Namespace diagnostic-test ready
+🔍 Setting up test environment...
+✅ Namespace diagnostic-test ready
 
-Running diagnostic tests...
-Test 1: Pod-to-Pod Connectivity
-✓ Test 1 PASSED: Both same-node and cross-node connectivity tests passed
+🧪 Running diagnostic tests...
+Test 1: 🔄 Pod-to-Pod Connectivity
+✅ Test 1 PASSED: Both same-node and cross-node connectivity tests passed
 
-Test 2: Service to Pod Connectivity
-✓ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity working
+Test 2: 🌐 Service to Pod Connectivity
+✅ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity working
 
-Test 3: Cross-Node Service Connectivity
-✓ Test 3 PASSED: Cross-node service connectivity test passed - HTTP connectivity working across nodes
+Test 3: 📡 Cross-Node Service Connectivity
+✅ Test 3 PASSED: Cross-node service connectivity test passed - HTTP connectivity working across nodes
 
-Test 4: DNS Resolution
-✓ Test 4 PASSED: DNS resolution test completed
+Test 4: 🔤 DNS Resolution
+✅ Test 4 PASSED: DNS resolution test completed
 
-Test 5: NodePort Service Connectivity
-✓ Test 5 PASSED: NodePort service connectivity test passed - HTTP connectivity working through node port
+Test 5: 🚪 NodePort Service Connectivity
+✅ Test 5 PASSED: NodePort service connectivity test passed - HTTP connectivity working through node port
 
-Test 6: LoadBalancer Service Connectivity
-✓ Test 6 PASSED: LoadBalancer service connectivity test passed - HTTP connectivity working via service
+Test 6: ⚖️ LoadBalancer Service Connectivity
+✅ Test 6 PASSED: LoadBalancer service connectivity test passed - HTTP connectivity working via service
 
-Cleaning up test environment...
+🧹 Cleaning up test environment...
 Namespace diagnostic-test cleaned up
-JSON report saved: test_results/k8s-diagnostic-results-20250709-150515.json
+[2025-07-10 14:51:39][INFO][test.go:271] JSON report saved: test_results/k8s-diagnostic-results-20250710-145139.json
 
-Test Summary:
+📊 Test Summary:
   Total Tests: 6, Passed: 6, Failed: 0
-  Passed Tests:
-    ✓ Pod-to-Pod Connectivity
-    ✓ Service to Pod Connectivity
-    ✓ Cross-Node Service Connectivity
-    ✓ DNS Resolution
-    ✓ NodePort Service Connectivity
-    ✓ LoadBalancer Service Connectivity
+  ✅ Passed Tests:
+    ✅ Pod-to-Pod Connectivity
+    ✅ Service to Pod Connectivity
+    ✅ Cross-Node Service Connectivity
+    ✅ DNS Resolution
+    ✅ NodePort Service Connectivity
+    ✅ LoadBalancer Service Connectivity
 
-✓ Overall Result: All 6 diagnostic tests passed
-Run with --verbose for detailed test steps
+🎉 Overall Result: All 6 diagnostic tests passed
+💡 Run with --verbose for detailed test steps
 
-Detailed results are stored in JSON file in the test_results/ folder for further analysis
+📁 Detailed results are stored in JSON file in the test_results/ folder for further analysis
 ```
 
 ### Verbose Output
@@ -761,6 +672,33 @@ Includes detailed information about:
 - Comprehensive cleanup operations
 - Manual kubectl command equivalents for education
 
+### Enhanced Logging System
+
+The tool now includes a sophisticated logging system that captures all outputs and diagnostic information:
+
+- **Log Levels**: DEBUG, INFO, WARNING, ERROR with appropriate coloring in terminal
+- **Context-Aware**: Each log entry includes which test/component generated it
+- **Source Tracking**: File names and line numbers identify exact code locations
+- **Command Capture**: Full stdout/stderr from all executed commands
+- **Timestamp-Based Files**: Log files with matching timestamps to JSON reports
+
+**Log File Location**:
+```
+test_results/logs/k8s-diagnostic-logs-YYYYMMDD-HHMMSS.log
+```
+
+**Sample Log Content**:
+```
+[2025-07-10 14:48:37][INFO][logging.go:82] Logging system initialized. Log file: k8s-diagnostic-logs-20250710-144837.log
+[2025-07-10 14:48:37][INFO][test.go:77] Starting Kubernetes connectivity diagnostic tests
+[2025-07-10 14:48:37][INFO][test.go:78] Configuration: namespace=demo, verbose=true, test-all=false
+[2025-07-10 14:48:37][DEBUG][test.go:87] Creating diagnostic tester with kubeconfig: , namespace: demo
+[2025-07-10 14:48:37][INFO][Test 1: Pod-to-Pod Connectivity][test.go:349] Starting test with configuration: {Placement:both}
+[2025-07-10 14:48:37][DEBUG][Test 1: Pod-to-Pod Connectivity][test.go:355] Executing test function
+[2025-07-10 14:48:51][INFO][Test 1: Pod-to-Pod Connectivity][test.go:361] Test completed in 14.29 seconds
+[2025-07-10 14:48:51][INFO][Test 1: Pod-to-Pod Connectivity][test.go:365] Test PASSED: Both same-node and cross-node connectivity tests passed
+```
+
 ### JSON Result Files
 
 **Every test execution automatically generates a comprehensive JSON report** saved to the `test_results/` directory. These files provide structured data perfect for monitoring dashboards, CI/CD integration, and historical analysis.
@@ -768,10 +706,12 @@ Includes detailed information about:
 #### File Naming and Location
 ```
 test_results/k8s-diagnostic-results-YYYYMMDD-HHMMSS.json
+test_results/logs/k8s-diagnostic-logs-YYYYMMDD-HHMMSS.log
 ```
 - **New file per execution** - no overwriting
 - **Timestamped filenames** prevent conflicts
-- **Organized storage** in dedicated directory
+- **Organized storage** in dedicated directories
+- **Matching timestamps** between JSON reports and log files
 
 #### Smart Detail Strategy
 
@@ -837,6 +777,7 @@ Each JSON file contains:
     "total_tests": 4,
     "passed": 4,
     "failed": 0,
+    "log_file": "k8s-diagnostic-logs-20250702-101146.log",
     "overall_status": "PASSED",
     "total_execution_time_seconds": 27.16,
     "errors_encountered": null,

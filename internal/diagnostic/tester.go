@@ -213,26 +213,26 @@ func (t *Tester) testSameNodePods(ctx context.Context, config TestConfig) TestRe
 	}
 	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod2Name, selectedNode))
 
-	// Wait for pods to be ready
-	if err := t.waitForPodReady(ctx, pod1Name, 120*time.Second); err != nil {
+	// Wait for pods to be ready using helper function
+	cleanupFunc := func() {
 		t.cleanupPods(ctx, pod1Name, pod2Name)
+	}
+
+	if err := t.WaitForPodReadyOrCleanup(ctx, pod1Name, 120*time.Second, cleanupFunc, &details); err != nil {
 		return TestResult{
 			Success: false,
 			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod1Name, err),
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod1Name))
 
-	if err := t.waitForPodReady(ctx, pod2Name, 120*time.Second); err != nil {
-		t.cleanupPods(ctx, pod1Name, pod2Name)
+	if err := t.WaitForPodReadyOrCleanup(ctx, pod2Name, 120*time.Second, cleanupFunc, &details); err != nil {
 		return TestResult{
 			Success: false,
 			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod2Name, err),
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod2Name))
 
 	// Test connectivity
 	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "same-node", &details)
@@ -293,26 +293,26 @@ func (t *Tester) testCrossNodePods(ctx context.Context, config TestConfig) TestR
 	}
 	details = append(details, fmt.Sprintf("✓ Created pod %s on node %s", pod2Name, workerNodes[1]))
 
-	// Wait for pods to be ready
-	if err := t.waitForPodReady(ctx, pod1Name, 120*time.Second); err != nil {
+	// Wait for pods to be ready using helper function
+	cleanupFunc := func() {
 		t.cleanupPods(ctx, pod1Name, pod2Name)
+	}
+
+	if err := t.WaitForPodReadyOrCleanup(ctx, pod1Name, 120*time.Second, cleanupFunc, &details); err != nil {
 		return TestResult{
 			Success: false,
 			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod1Name, err),
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod1Name))
 
-	if err := t.waitForPodReady(ctx, pod2Name, 120*time.Second); err != nil {
-		t.cleanupPods(ctx, pod1Name, pod2Name)
+	if err := t.WaitForPodReadyOrCleanup(ctx, pod2Name, 120*time.Second, cleanupFunc, &details); err != nil {
 		return TestResult{
 			Success: false,
 			Message: fmt.Sprintf("Pod %s did not become ready: %v", pod2Name, err),
 			Details: details,
 		}
 	}
-	details = append(details, fmt.Sprintf("✓ Pod %s is ready", pod2Name))
 
 	// Test connectivity
 	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "cross-node", &details)
@@ -826,28 +826,7 @@ func (t *Tester) TestNodePortServiceConnectivity(ctx context.Context) TestResult
 	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
 
 	// Step 2: Create NodePort service to expose the deployment
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName,
-			Namespace: t.namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": deploymentName,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       80,
-					TargetPort: intstr.FromInt(80),
-					Protocol:   corev1.ProtocolTCP,
-					// NodePort will be auto-assigned if not specified (30000-32767 range)
-				},
-			},
-			Type: corev1.ServiceTypeNodePort,
-		},
-	}
-
-	createdService, err := t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+	createdService, err := t.createNginxServiceWithType(ctx, serviceName, deploymentName, ServiceTypeNodePort)
 	if err != nil {
 		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
 		return TestResult{
@@ -1010,27 +989,7 @@ func (t *Tester) TestLoadBalancerServiceConnectivity(ctx context.Context) TestRe
 	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
 
 	// Step 2: Create LoadBalancer service to expose the deployment
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName,
-			Namespace: t.namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": deploymentName,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       80,
-					TargetPort: intstr.FromInt(80),
-					Protocol:   corev1.ProtocolTCP,
-				},
-			},
-			Type: corev1.ServiceTypeLoadBalancer,
-		},
-	}
-
-	createdService, err := t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+	createdService, err := t.createNginxServiceWithType(ctx, serviceName, deploymentName, ServiceTypeLoadBalancer)
 	if err != nil {
 		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
 		return TestResult{
@@ -1228,6 +1187,30 @@ func (t *Tester) waitForPodReady(ctx context.Context, podName string, timeout ti
 	}
 }
 
+// WaitForPodReadyOrCleanup encapsulates the common pattern of waiting for pod readiness and cleanup on failure
+func (t *Tester) WaitForPodReadyOrCleanup(
+	ctx context.Context,
+	podName string,
+	timeout time.Duration,
+	cleanupFunc func(),
+	details *[]string,
+) error {
+	if err := t.waitForPodReady(ctx, podName, timeout); err != nil {
+		if cleanupFunc != nil {
+			cleanupFunc()
+		}
+		if details != nil {
+			*details = append(*details, fmt.Sprintf("✗ Pod %s did not become ready: %v", podName, err))
+		}
+		return err
+	}
+
+	if details != nil {
+		*details = append(*details, fmt.Sprintf("✓ Pod %s is ready", podName))
+	}
+	return nil
+}
+
 // pingFromPod executes ping command from one pod to another
 func (t *Tester) pingFromPod(ctx context.Context, fromPod, targetIP string) (string, error) {
 	req := t.clientset.CoreV1().RESTClient().Post().
@@ -1339,8 +1322,34 @@ func (t *Tester) waitForDeploymentReady(ctx context.Context, deploymentName stri
 	}
 }
 
-// createNginxService creates a service to expose the nginx deployment
+// ServiceType represents Kubernetes service types used in tests
+type ServiceType string
+
+const (
+	ServiceTypeClusterIP    ServiceType = "ClusterIP"
+	ServiceTypeNodePort     ServiceType = "NodePort"
+	ServiceTypeLoadBalancer ServiceType = "LoadBalancer"
+)
+
+// createNginxService creates a service to expose the nginx deployment with the specified service type
 func (t *Tester) createNginxService(ctx context.Context, serviceName, deploymentName string) (*corev1.Service, error) {
+	return t.createNginxServiceWithType(ctx, serviceName, deploymentName, ServiceTypeClusterIP)
+}
+
+// createNginxServiceWithType creates a service of the specified type to expose the nginx deployment
+func (t *Tester) createNginxServiceWithType(ctx context.Context, serviceName, deploymentName string, serviceType ServiceType) (*corev1.Service, error) {
+	var k8sServiceType corev1.ServiceType
+
+	// Convert our ServiceType to Kubernetes ServiceType
+	switch serviceType {
+	case ServiceTypeNodePort:
+		k8sServiceType = corev1.ServiceTypeNodePort
+	case ServiceTypeLoadBalancer:
+		k8sServiceType = corev1.ServiceTypeLoadBalancer
+	default:
+		k8sServiceType = corev1.ServiceTypeClusterIP
+	}
+
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName,
@@ -1357,7 +1366,7 @@ func (t *Tester) createNginxService(ctx context.Context, serviceName, deployment
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
-			Type: corev1.ServiceTypeClusterIP,
+			Type: k8sServiceType,
 		},
 	}
 

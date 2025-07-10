@@ -62,6 +62,7 @@ type ExecutionInfoJSON struct {
 	Namespace        string `json:"namespace"`
 	KubeconfigSource string `json:"kubeconfig_source"`
 	VerboseMode      bool   `json:"verbose_mode"`
+	LogFile          string `json:"log_file,omitempty"`
 }
 
 // SummaryJSON represents the overall test summary
