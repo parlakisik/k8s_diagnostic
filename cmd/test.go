@@ -194,12 +194,25 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		result := overallResult
 
-		// Clean up namespace after all tests
-		fmt.Printf("\nCleaning up test environment...\n")
-		if err := tester.CleanupNamespace(ctx); err != nil {
-			fmt.Printf("WARNING: Failed to cleanup namespace %s: %v\n", namespace, err)
+		// Get the keep-namespace flag
+		keepNamespace, _ := cmd.Flags().GetBool("keep-namespace")
+
+		// Determine if we should clean up the namespace
+		// - Only clean up if running all tests AND not explicitly keeping namespace
+		// - For selective tests, always keep namespace by default
+		shouldCleanup := testAll && !keepNamespace
+
+		if shouldCleanup {
+			// Clean up namespace after tests
+			fmt.Printf("\nCleaning up test environment...\n")
+			if err := tester.CleanupNamespace(ctx); err != nil {
+				fmt.Printf("WARNING: Failed to cleanup namespace %s: %v\n", namespace, err)
+			} else {
+				fmt.Printf("Namespace %s cleaned up\n", namespace)
+			}
 		} else {
-			fmt.Printf("Namespace %s cleaned up\n", namespace)
+			fmt.Printf("\nKeeping namespace %s for future test runs\n", namespace)
+			fmt.Printf("To delete the namespace manually: kubectl delete namespace %s\n", namespace)
 		}
 
 		// Generate and save JSON report
@@ -364,5 +377,6 @@ func init() {
 	testCmd.Flags().String("kubeconfig", "", "path to kubeconfig file (inherits from global flag)")
 	testCmd.Flags().String("placement", "both", "pod placement strategy for pod-to-pod connectivity: same-node|cross-node|both")
 	testCmd.Flags().Bool("test-all", false, "run all available tests")
+	testCmd.Flags().Bool("keep-namespace", false, "keep the test namespace after tests complete (useful for running multiple test sequences)")
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer (default: pod-to-pod,service-to-pod,cross-node,dns)")
 }

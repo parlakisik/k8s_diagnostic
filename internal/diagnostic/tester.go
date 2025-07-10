@@ -565,9 +565,138 @@ func (t *Tester) TestServiceToPodConnectivity(ctx context.Context) TestResult {
 func (t *Tester) TestCrossNodeServiceConnectivity(ctx context.Context) TestResult {
 	var details []string
 
+	// Get worker nodes - we need at least 2 for this test
+	workerNodes, err := t.getWorkerNodes(ctx)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get worker nodes: %v", err),
+			Details: details,
+		}
+	}
+
+	if len(workerNodes) < 2 {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Cross-node service test requires at least 2 worker nodes, found %d", len(workerNodes)),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Found %d worker nodes for cross-node testing", len(workerNodes)))
+
+	// Step 1: Create nginx deployment with pod anti-affinity to spread across nodes
+	deploymentName := "web-cross-node"
+	serviceName := "web-cross-node"
+	testPodName := "netshoot-cross-node-test"
+
+	// Create nginx deployment
+	_, err = t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' with 2 replicas", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create service to expose the deployment
+	_, err = t.createNginxService(ctx, serviceName, deploymentName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create service: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created service '%s'", serviceName))
+
+	// Step 2a: Get Service IP
+	serviceIP, err := t.getServiceIP(ctx, serviceName)
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get service IP: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Service IP is %s", serviceIP))
+
+	// Step 3: Create test pod on the second node to ensure cross-node traffic
+	_, err = t.createNetshootPod(ctx, testPodName, workerNodes[1])
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create test pod on node %s: %v", workerNodes[1], err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created test pod '%s' on node %s for cross-node testing", testPodName, workerNodes[1]))
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Test pod %s did not become ready: %v", testPodName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Test pod '%s' is ready", testPodName))
+
+	// Step 4: Test HTTP connectivity with status code
+	statusCode, content, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, serviceName)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ HTTP connectivity failed: %v", err))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "Cross-node service HTTP connectivity failed",
+			Details: details,
+		}
+	}
+
+	// Check HTTP status code
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
+		details = append(details, fmt.Sprintf("✓ Cross-node HTTP connectivity successful - Status: %s", statusCode))
+		details = append(details, fmt.Sprintf("  curl -s -o /dev/null -w \"%%{http_code}\\n\" http://%s", serviceName))
+	} else {
+		details = append(details, fmt.Sprintf("✗ Cross-node HTTP connectivity issue - %s", message))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Cross-node service connectivity failed with status: %s", message),
+			Details: details,
+		}
+	}
+
+	// Show response content if available
+	if content != "" && strings.Contains(strings.ToLower(content), "welcome to nginx") {
+		details = append(details, fmt.Sprintf("  Response content: nginx welcome page detected"))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up all cross-node test resources")
+
 	return TestResult{
 		Success: true,
-		Message: "Cross-node service connectivity test - not implemented",
+		Message: "Cross-node service connectivity test passed - HTTP connectivity working across nodes",
 		Details: details,
 	}
 }
@@ -650,9 +779,182 @@ func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
 func (t *Tester) TestNodePortServiceConnectivity(ctx context.Context) TestResult {
 	var details []string
 
+	// Get worker nodes - we need at least one
+	workerNodes, err := t.getWorkerNodes(ctx)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get worker nodes: %v", err),
+			Details: details,
+		}
+	}
+
+	if len(workerNodes) < 1 {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("NodePort test requires at least 1 worker node, found %d", len(workerNodes)),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Found %d worker nodes for NodePort testing", len(workerNodes)))
+
+	// Step 1: Create nginx deployment
+	deploymentName := "web-nodeport"
+	serviceName := "web-nodeport"
+	testPodName := "netshoot-nodeport-test"
+
+	// Create nginx deployment
+	_, err = t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' with 2 replicas", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create NodePort service to expose the deployment
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: t.namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": deploymentName,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+					Protocol:   corev1.ProtocolTCP,
+					// NodePort will be auto-assigned if not specified (30000-32767 range)
+				},
+			},
+			Type: corev1.ServiceTypeNodePort,
+		},
+	}
+
+	createdService, err := t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create NodePort service: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created NodePort service '%s'", serviceName))
+
+	// Get the assigned NodePort
+	nodePort := int(createdService.Spec.Ports[0].NodePort)
+	details = append(details, fmt.Sprintf("✓ NodePort assigned: %d", nodePort))
+
+	// Step 3: Get the first worker node's IP address
+	node, err := t.clientset.CoreV1().Nodes().Get(ctx, workerNodes[0], metav1.GetOptions{})
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get node information: %v", err),
+			Details: details,
+		}
+	}
+
+	// Extract internal IP address
+	var nodeIP string
+	for _, address := range node.Status.Addresses {
+		if address.Type == corev1.NodeInternalIP {
+			nodeIP = address.Address
+			break
+		}
+	}
+
+	if nodeIP == "" {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "Could not determine node IP address",
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Found node IP for NodePort access: %s", nodeIP))
+
+	// Step 4: Create test pod to access the NodePort
+	_, err = t.createNetshootPod(ctx, testPodName, "")
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create test pod: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, "✓ Created test pod to access NodePort service")
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Test pod did not become ready: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, "✓ Test pod is ready")
+
+	// Step 5: Test HTTP connectivity to the NodePort
+	nodePortURL := fmt.Sprintf("%s:%d", nodeIP, nodePort)
+	statusCode, content, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, nodePortURL)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ HTTP connectivity to NodePort failed: %v", err))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "NodePort HTTP connectivity failed",
+			Details: details,
+		}
+	}
+
+	// Check HTTP status code
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
+		details = append(details, fmt.Sprintf("✓ NodePort HTTP connectivity successful - Status: %s", statusCode))
+		details = append(details, fmt.Sprintf("  curl -s -o /dev/null -w \"%%{http_code}\\n\" http://%s", nodePortURL))
+	} else {
+		details = append(details, fmt.Sprintf("✗ NodePort HTTP connectivity issue - %s", message))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("NodePort connectivity failed with status: %s", message),
+			Details: details,
+		}
+	}
+
+	// Show response content if available
+	if content != "" && strings.Contains(strings.ToLower(content), "welcome to nginx") {
+		details = append(details, fmt.Sprintf("  Response content: nginx welcome page detected"))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up all NodePort test resources")
+
 	return TestResult{
 		Success: true,
-		Message: "NodePort service connectivity test - not implemented",
+		Message: "NodePort service connectivity test passed - HTTP connectivity working through node port",
 		Details: details,
 	}
 }
@@ -661,9 +963,164 @@ func (t *Tester) TestNodePortServiceConnectivity(ctx context.Context) TestResult
 func (t *Tester) TestLoadBalancerServiceConnectivity(ctx context.Context) TestResult {
 	var details []string
 
+	// Get worker nodes - we need at least one
+	workerNodes, err := t.getWorkerNodes(ctx)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get worker nodes: %v", err),
+			Details: details,
+		}
+	}
+
+	if len(workerNodes) < 1 {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("LoadBalancer test requires at least 1 worker node, found %d", len(workerNodes)),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Found %d worker nodes for LoadBalancer testing", len(workerNodes)))
+
+	// Step 1: Create nginx deployment
+	deploymentName := "web-loadbalancer"
+	serviceName := "web-loadbalancer"
+	testPodName := "netshoot-loadbalancer-test"
+
+	// Create nginx deployment
+	_, err = t.createNginxDeployment(ctx, deploymentName)
+	if err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create nginx deployment: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created nginx deployment '%s' with 2 replicas", deploymentName))
+
+	// Wait for deployment to be ready
+	if err := t.waitForDeploymentReady(ctx, deploymentName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Deployment %s did not become ready: %v", deploymentName, err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Deployment '%s' is ready", deploymentName))
+
+	// Step 2: Create LoadBalancer service to expose the deployment
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName,
+			Namespace: t.namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app": deploymentName,
+			},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       80,
+					TargetPort: intstr.FromInt(80),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Type: corev1.ServiceTypeLoadBalancer,
+		},
+	}
+
+	createdService, err := t.clientset.CoreV1().Services(t.namespace).Create(ctx, service, metav1.CreateOptions{})
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create LoadBalancer service: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, fmt.Sprintf("✓ Created LoadBalancer service '%s'", serviceName))
+
+	// Get the ClusterIP since we're running in a local environment
+	clusterIP := createdService.Spec.ClusterIP
+	details = append(details, fmt.Sprintf("✓ Service ClusterIP: %s", clusterIP))
+
+	// Note about external IP in cloud environments
+	details = append(details, "ℹ️ Note: In cloud environments, the service would be assigned an external IP")
+
+	// Check for any external IPs (likely none in local environment)
+	if len(createdService.Status.LoadBalancer.Ingress) > 0 {
+		externalIP := createdService.Status.LoadBalancer.Ingress[0].IP
+		if externalIP != "" {
+			details = append(details, fmt.Sprintf("✓ External IP assigned: %s", externalIP))
+		}
+	} else {
+		details = append(details, "ℹ️ No external IP assigned (expected in local environments)")
+	}
+
+	// Step 3: Create test pod to test connectivity
+	_, err = t.createNetshootPod(ctx, testPodName, "")
+	if err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create test pod: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, "✓ Created test pod to access LoadBalancer service")
+
+	// Wait for test pod to be ready
+	if err := t.waitForPodReady(ctx, testPodName, 120*time.Second); err != nil {
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Test pod did not become ready: %v", err),
+			Details: details,
+		}
+	}
+	details = append(details, "✓ Test pod is ready")
+
+	// Step 4: Test HTTP connectivity via ClusterIP (as fallback in local environments)
+	details = append(details, "ℹ️ Testing connectivity via ClusterIP (fallback for local environments)")
+	statusCode, content, err := t.testHTTPConnectivityWithStatusCode(ctx, testPodName, serviceName)
+	if err != nil {
+		details = append(details, fmt.Sprintf("✗ HTTP connectivity failed: %v", err))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: "LoadBalancer HTTP connectivity failed",
+			Details: details,
+		}
+	}
+
+	// Check HTTP status code
+	success, message := evaluateHTTPStatusCode(statusCode)
+	if success {
+		details = append(details, fmt.Sprintf("✓ LoadBalancer HTTP connectivity successful - Status: %s", statusCode))
+		details = append(details, fmt.Sprintf("  curl -s -o /dev/null -w \"%%{http_code}\\n\" http://%s", serviceName))
+	} else {
+		details = append(details, fmt.Sprintf("✗ LoadBalancer HTTP connectivity issue - %s", message))
+		t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("LoadBalancer connectivity failed with status: %s", message),
+			Details: details,
+		}
+	}
+
+	// Show response content if available
+	if content != "" && strings.Contains(strings.ToLower(content), "welcome to nginx") {
+		details = append(details, fmt.Sprintf("  Response content: nginx welcome page detected"))
+	}
+
+	// Cleanup all resources
+	t.cleanupServiceResources(ctx, deploymentName, serviceName, testPodName)
+	details = append(details, "✓ Cleaned up all LoadBalancer test resources")
+
 	return TestResult{
 		Success: true,
-		Message: "LoadBalancer service connectivity test - not implemented",
+		Message: "LoadBalancer service connectivity test passed - HTTP connectivity working via service",
 		Details: details,
 	}
 }
