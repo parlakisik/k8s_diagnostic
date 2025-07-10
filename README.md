@@ -31,11 +31,12 @@ Explore enhanced versions with specialized capabilities:
   - ✓ Screenshot-ready output
 
 ### **Core Features (This Branch):**
-- **4 Comprehensive Tests**: Pod-to-Pod, Service-to-Pod, Cross-Node Service, DNS Resolution
+- **6 Comprehensive Tests**: Pod-to-Pod, Service-to-Pod, Cross-Node Service, DNS Resolution, NodePort Service, LoadBalancer Service
 - **Production Ready**: Stable, reliable connectivity testing
 - **Educational Output**: Detailed explanations and equivalent kubectl commands
 - **JSON Reporting**: Structured results for automation and monitoring
 - **Clean Architecture**: Well-organized, maintainable codebase
+- **Namespace Persistence**: Optional preservation of test namespace between runs for efficient testing
 
 ## Overview
 
@@ -51,6 +52,8 @@ This project provides:
 - **Service-to-Pod Connectivity**: Creates nginx deployment + service and tests HTTP connectivity and load balancing (DNS testing separated)
 - **Cross-Node Service Connectivity**: Tests service connectivity from remote nodes to validate kube-proxy inter-node routing
 - **DNS Resolution**: Dedicated DNS testing including service FQDN resolution, short names, and pod-to-pod DNS validation
+- **NodePort Service Connectivity**: Tests external access to services through node ports, validating access from outside the cluster
+- **LoadBalancer Service Connectivity**: Tests LoadBalancer service type functionality for cloud or on-premise deployments
 
 ### Key Capabilities
 - **Real Pod Testing**: Uses actual Kubernetes pods, not simulated connections
@@ -183,45 +186,43 @@ This project provides:
 
 **Step-by-Step Process:**
 
-1. **Create Nginx Deployment**
-   - Creates deployment named `"web-cross"` with 2 replicas
+1. **Find Worker Nodes for Cross-Node Testing**
+   - Gets all worker nodes by filtering out control-plane/master nodes
+   - Requires at least 2 worker nodes - fails immediately if fewer than 2
+   - Reports: "✓ Found 2 worker nodes for cross-node testing"
+
+2. **Create Nginx Deployment**
+   - Creates deployment named `"web-cross-node"` with 2 replicas
    - Uses `nginx:alpine` image
-   - Labels pods with `app: web-cross`
+   - Labels pods with `app: web-cross-node`
 
-2. **Discover Nginx Pod Node Locations**
-   - Lists all pods with label `app=web-cross`
-   - Maps each pod to its worker node using `pod.Spec.NodeName`
-   - Deduplicates node names
-   - Reports: "✓ Nginx pods running on nodes: [node1, node2]"
-
-3. **Find Different Worker Node**
-   - Gets all worker nodes in cluster
-   - Excludes nodes where nginx pods are running
-   - Selects different node for cross-node testing
-   - **Fallback:** If all nodes have nginx pods, uses first worker node
-   - Reports: "✓ Selected different node 'worker-node-X' for cross-node test"
+3. **Wait for Deployment Readiness**
+   - 120-second timeout for deployment to become ready
+   - Ensures both nginx pods are running before proceeding
+   - Reports: "✓ Deployment 'web-cross-node' is ready"
 
 4. **Create Service and Get IP**
-   - Creates ClusterIP service named `"web-cross"`
-   - Selector: `app: web-cross`
+   - Creates ClusterIP service named `"web-cross-node"`
+   - Selector: `app: web-cross-node`
    - Port 80 → 80 mapping
    - Retrieves auto-assigned ClusterIP
+   - Reports: "✓ Service IP is X.X.X.X"
 
-5. **Create Test Pod on Remote Node**
+5. **Create Test Pod on Specific Node**
    - Creates `netshoot-cross-node-test` pod
-   - **Critical:** Uses `NodeName` to force placement on different node
+   - **Critical:** Uses `NodeName` to force placement on specific node (worker node 2)
    - Ensures guaranteed cross-node service access
-   - 120-second timeout for readiness
+   - Reports: "✓ Created test pod 'netshoot-cross-node-test' on node X for cross-node testing"
 
 6. **Test Cross-Node HTTP Connectivity**
-   - Service name test: `curl -s -o /dev/null -w "%{http_code}" http://web-cross`
-   - Direct IP test: `curl -s -o /dev/null -w "%{http_code}" http://[service_IP]`
+   - Service name test: `curl -s -o /dev/null -w "%{http_code}" http://web-cross-node`
    - Validates kube-proxy routes traffic from remote node to nginx pods
-   - Verifies nginx welcome page in responses
+   - Reports: "✓ Cross-node HTTP connectivity successful - Status: 200"
 
 7. **Cleanup**
    - Deletes deployment, service, and test pod
-   - **Success message:** "Cross-node service connectivity validated - kube-proxy inter-node routing confirmed"
+   - Reports: "✓ Cleaned up all cross-node test resources"
+   - **Success message:** "Cross-node service connectivity test passed - HTTP connectivity working across nodes"
 
 **What This Validates:**
 - kube-proxy inter-node routing
@@ -284,6 +285,131 @@ This project provides:
 - Search domain misconfiguration
 - Network policies blocking DNS traffic
 - DNS service discovery broken
+
+---
+
+### Test 5: NodePort Service Connectivity
+
+**Purpose:** Validates the functionality of NodePort-type services, which expose applications externally via node ports accessible from outside the cluster.
+
+**Step-by-Step Process:**
+
+1. **Find Worker Nodes for NodePort Testing**
+   - Gets all worker nodes by filtering out control-plane/master nodes
+   - Requires at least 1 worker node with external IP/hostname
+   - Reports: "✓ Found X worker nodes for NodePort testing"
+
+2. **Create Nginx Deployment**
+   - Creates deployment named `"web-nodeport"` with 2 replicas
+   - Uses `nginx:alpine` image
+   - Labels pods with `app: web-nodeport`
+   - Reports: "✓ Created nginx deployment 'web-nodeport' with 2 replicas"
+
+3. **Wait for Deployment Readiness**
+   - 120-second timeout for deployment to become ready
+   - Ensures all nginx pods are running before proceeding
+   - Reports: "✓ Deployment 'web-nodeport' is ready"
+
+4. **Create NodePort Service**
+   - Creates service named `"web-nodeport"` with type NodePort
+   - Selector: `app: web-nodeport`
+   - Port 80 → 80 mapping, with dynamic NodePort assignment
+   - Reports: "✓ Created NodePort service 'web-nodeport'"
+
+5. **Get Assigned NodePort**
+   - Retrieves auto-assigned NodePort from service specification
+   - Typically in the 30000-32767 range
+   - Reports: "✓ NodePort assigned: XXXX"
+
+6. **Find Node IP for NodePort Access**
+   - Gets External IP or hostname of a worker node
+   - Selects the first available worker node
+   - Reports: "✓ Found node IP for NodePort access: X.X.X.X"
+
+7. **Create Test Pod to Access NodePort**
+   - Creates `netshoot` pod to test NodePort access
+   - Test pod simulates external client access
+   - Reports: "✓ Created test pod to access NodePort service"
+
+8. **Test HTTP Connectivity via NodePort**
+   - Uses curl to access service via NodeIP:NodePort
+   - Command: `curl -s -o /dev/null -w "%{http_code}" http://[node-ip]:[node-port]`
+   - Validates external access works correctly
+   - Reports: "✓ NodePort HTTP connectivity successful - Status: 200"
+
+9. **Cleanup**
+   - Deletes deployment, service, and test pod
+   - Reports: "✓ Cleaned up all NodePort test resources"
+   - **Success message:** "NodePort service connectivity test passed - HTTP connectivity working through node port"
+
+**What This Validates:**
+- NodePort service type functions correctly
+- External access to services works
+- kube-proxy configures host network correctly
+- Node ports are properly exposed
+- Traffic routing from external sources to pods works
+- iptables/ipvs rules are configured correctly
+
+---
+
+### Test 6: LoadBalancer Service Connectivity
+
+**Purpose:** Tests functionality of LoadBalancer-type services, which expose applications externally through cloud provider load balancers or on-premise equivalents.
+
+**Step-by-Step Process:**
+
+1. **Find Worker Nodes for LoadBalancer Testing**
+   - Gets all worker nodes by filtering out control-plane/master nodes
+   - Reports: "✓ Found X worker nodes for LoadBalancer testing"
+
+2. **Create Nginx Deployment**
+   - Creates deployment named `"web-loadbalancer"` with 2 replicas
+   - Uses `nginx:alpine` image
+   - Labels pods with `app: web-loadbalancer`
+   - Reports: "✓ Created nginx deployment 'web-loadbalancer' with 2 replicas"
+
+3. **Wait for Deployment Readiness**
+   - 120-second timeout for deployment to become ready
+   - Ensures all nginx pods are running before proceeding
+   - Reports: "✓ Deployment 'web-loadbalancer' is ready"
+
+4. **Create LoadBalancer Service**
+   - Creates service named `"web-loadbalancer"` with type LoadBalancer
+   - Selector: `app: web-loadbalancer`
+   - Port 80 → 80 mapping
+   - Reports: "✓ Created LoadBalancer service 'web-loadbalancer'"
+
+5. **Get Service ClusterIP and Check External IP**
+   - Retrieves auto-assigned ClusterIP
+   - Checks for External IP (may be pending in local environments)
+   - Reports: "✓ Service ClusterIP: X.X.X.X"
+   - Reports: "ℹ️ No external IP assigned (expected in local environments)" OR
+   - Reports: "✓ External IP assigned: X.X.X.X"
+
+6. **Create Test Pod to Access LoadBalancer Service**
+   - Creates `netshoot` pod to test service access
+   - Reports: "✓ Created test pod to access LoadBalancer service"
+
+7. **Test HTTP Connectivity**
+   - In local environments without external IPs:
+     - Reports: "ℹ️ Testing connectivity via ClusterIP (fallback for local environments)"
+     - Uses service name: `curl -s -o /dev/null -w "%{http_code}" http://web-loadbalancer`
+   - In cloud environments with external IPs:
+     - Uses external IP: `curl -s -o /dev/null -w "%{http_code}" http://[external-ip]`
+   - Reports: "✓ LoadBalancer HTTP connectivity successful - Status: 200"
+
+8. **Cleanup**
+   - Deletes deployment, service, and test pod
+   - Reports: "✓ Cleaned up all LoadBalancer test resources"
+   - **Success message:** "LoadBalancer service connectivity test passed - HTTP connectivity working via service"
+
+**What This Validates:**
+- LoadBalancer service type functions correctly
+- Cloud provider integration works (if applicable)
+- External IP assignment process works (in cloud environments)
+- Graceful fallback to ClusterIP in local environments
+- Traffic routing through load balancer to pods works
+- Service discovery via service name works
 
 ---
 
@@ -527,9 +653,48 @@ OPTIONS:
     -n, --namespace string    Namespace to run tests in (default: "diagnostic-test")
     --kubeconfig string       Path to kubeconfig file
     -v, --verbose            Verbose output with detailed test steps
-
+    --test-all               Run all available tests
+    --test-list string       Comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer
+    --keep-namespace         Keep the test namespace after tests complete (useful for running multiple test sequences)
+    
 Global Options:
     --config string          Config file (default: $HOME/.k8s-diagnostic.yaml)
+```
+
+### Namespace Management
+
+The tool includes intelligent namespace management to improve testing efficiency:
+
+**Default Behavior:**
+- When running **selective tests** (--test-list or default subset): The namespace is **preserved** after tests complete
+- When running **all tests** (--test-all): The namespace is **cleaned up** after tests complete
+
+**Override Options:**
+- `--keep-namespace`: Forces namespace preservation regardless of test mode
+- Manual cleanup: `kubectl delete namespace diagnostic-test`
+
+**Benefits:**
+- **Efficient Testing**: Run multiple test sequences without recreating the namespace each time
+- **Resource Conservation**: Reduces API server load from repeated namespace creation/deletion
+- **Faster Sequential Tests**: Significant time savings when running multiple selective tests
+- **Automatic Cleanup**: Full test suite still performs proper cleanup
+
+**Example Usage:**
+```bash
+# Run a single test - namespace persists for next test
+./k8s-diagnostic test --test-list cross-node
+
+# Run another test using the same namespace
+./k8s-diagnostic test --test-list nodeport
+
+# Run all tests - namespace automatically cleaned up
+./k8s-diagnostic test --test-all
+
+# Force namespace preservation even with --test-all
+./k8s-diagnostic test --test-all --keep-namespace
+
+# Manual cleanup when done testing
+kubectl delete namespace diagnostic-test
 ```
 
 ## Test Output
@@ -543,30 +708,38 @@ Namespace diagnostic-test ready
 
 Running diagnostic tests...
 Test 1: Pod-to-Pod Connectivity
-✓ Test 1 PASSED: Pod netshoot-test-2 is reachable from pod netshoot-test-1
+✓ Test 1 PASSED: Both same-node and cross-node connectivity tests passed
 
 Test 2: Service to Pod Connectivity
-✓ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity and load balancing working
+✓ Test 2 PASSED: Service to Pod connectivity test passed - HTTP connectivity working
 
 Test 3: Cross-Node Service Connectivity
-✓ Test 3 PASSED: Cross-node service connectivity validated - kube-proxy inter-node routing confirmed
+✓ Test 3 PASSED: Cross-node service connectivity test passed - HTTP connectivity working across nodes
 
 Test 4: DNS Resolution
-✓ Test 4 PASSED: DNS resolution test passed - service FQDN and short name resolution working
+✓ Test 4 PASSED: DNS resolution test completed
+
+Test 5: NodePort Service Connectivity
+✓ Test 5 PASSED: NodePort service connectivity test passed - HTTP connectivity working through node port
+
+Test 6: LoadBalancer Service Connectivity
+✓ Test 6 PASSED: LoadBalancer service connectivity test passed - HTTP connectivity working via service
 
 Cleaning up test environment...
 Namespace diagnostic-test cleaned up
-JSON report saved: test_results/k8s-diagnostic-results-20250702-101146.json
+JSON report saved: test_results/k8s-diagnostic-results-20250709-150515.json
 
 Test Summary:
-  Total Tests: 4, Passed: 4, Failed: 0
+  Total Tests: 6, Passed: 6, Failed: 0
   Passed Tests:
     ✓ Pod-to-Pod Connectivity
     ✓ Service to Pod Connectivity
     ✓ Cross-Node Service Connectivity
     ✓ DNS Resolution
+    ✓ NodePort Service Connectivity
+    ✓ LoadBalancer Service Connectivity
 
-✓ Overall Result: All 4 diagnostic tests passed
+✓ Overall Result: All 6 diagnostic tests passed
 Run with --verbose for detailed test steps
 
 Detailed results are stored in JSON file in the test_results/ folder for further analysis
