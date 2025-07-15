@@ -72,7 +72,8 @@ type DetailedDiagnostics struct {
 
 // TestConfig represents configuration for test execution
 type TestConfig struct {
-	Placement string `json:"placement"` // "same-node", "cross-node", "both"
+	Placement              string `json:"placement"` // "same-node", "cross-node", "both"
+	FailCiliumConnectivity bool   `json:"fail_cilium_connectivity"`
 }
 
 // TestResult represents the result of a connectivity test
@@ -235,7 +236,7 @@ func (t *Tester) testSameNodePods(ctx context.Context, config TestConfig) TestRe
 	}
 
 	// Test connectivity
-	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "same-node", &details)
+	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "same-node", &details, config)
 
 	// Cleanup pods
 	t.cleanupPods(ctx, pod1Name, pod2Name)
@@ -315,7 +316,7 @@ func (t *Tester) testCrossNodePods(ctx context.Context, config TestConfig) TestR
 	}
 
 	// Test connectivity
-	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "cross-node", &details)
+	result := t.testPodConnectivity(ctx, pod1Name, pod2Name, pod2, "cross-node", &details, config)
 
 	// Cleanup pods
 	t.cleanupPods(ctx, pod1Name, pod2Name)
@@ -367,7 +368,8 @@ func (t *Tester) testBothPlacements(ctx context.Context, config TestConfig) Test
 }
 
 // testPodConnectivity tests ICMP ping connectivity between two pods
-func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string, toPodObj *corev1.Pod, placement string, details *[]string) TestResult {
+func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string, toPodObj *corev1.Pod, placement string, details *[]string, config TestConfig) TestResult {
+
 	// Get target pod IP
 	pod2IP := toPodObj.Status.PodIP
 	if pod2IP == "" {

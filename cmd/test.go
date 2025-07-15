@@ -160,6 +160,25 @@ All test resources will be created in the specified namespace (default: diagnost
 			}
 		}
 
+		// Get the block-pod-connectivity flag
+		blockPodConnectivity, _ := cmd.Flags().GetBool("block-pod-connectivity")
+
+		// Log when the block connectivity flag is enabled and apply policy if requested
+		if blockPodConnectivity {
+			fmt.Printf("\n⚠️  BLOCKING MODE: A Kubernetes NetworkPolicy will be applied to block pod connectivity\n\n")
+			logger.LogWarning("Pod connectivity blocking enabled via --block-pod-connectivity flag")
+
+			logger.LogInfo("Applying NetworkPolicy to block pod-to-pod traffic")
+			if err := tester.ApplyNetworkPolicy(ctx); err != nil {
+				logger.LogError("Failed to apply NetworkPolicy: %v", err)
+				fmt.Printf("❌ Failed to apply NetworkPolicy: %v\n\n", err)
+				fmt.Printf("Continuing with tests, but connectivity may not be blocked as requested.\n\n")
+			} else {
+				logger.LogInfo("Successfully applied NetworkPolicy to block pod-to-pod traffic")
+				fmt.Printf("✅ Successfully applied NetworkPolicy to block pod-to-pod traffic\n\n")
+			}
+		}
+
 		// Execute tests based on test registry
 		testConfig := diagnostic.TestConfig{
 			Placement: placement,
@@ -244,6 +263,19 @@ All test resources will be created in the specified namespace (default: diagnost
 		}
 
 		result := overallResult
+
+		// Clean up NetworkPolicy if it was applied, regardless of keep-namespace flag
+		if blockPodConnectivity {
+			logger.LogInfo("Removing NetworkPolicy")
+			if err := tester.RemoveNetworkPolicy(ctx); err != nil {
+				logger.LogWarning("Failed to remove NetworkPolicy: %v", err)
+				fmt.Printf("⚠️ Warning: Failed to remove NetworkPolicy: %v\n", err)
+				fmt.Printf("You may need to manually remove it: kubectl delete networkpolicy block-pod-ping -n %s\n\n", namespace)
+			} else {
+				logger.LogInfo("Successfully removed NetworkPolicy")
+				fmt.Printf("✅ NetworkPolicy removed\n\n")
+			}
+		}
 
 		// Get the keep-namespace flag
 		keepNamespace, _ := cmd.Flags().GetBool("keep-namespace")
@@ -514,4 +546,5 @@ func init() {
 	testCmd.Flags().String("test-group", "", "run tests by group: networking (more groups coming soon)")
 	testCmd.Flags().Bool("keep-namespace", false, "keep the test namespace after tests complete (useful for running multiple test sequences)")
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer")
+	testCmd.Flags().Bool("block-pod-connectivity", false, "apply a Kubernetes NetworkPolicy to block pod-to-pod connectivity for demonstration purposes")
 }
