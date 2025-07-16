@@ -4,6 +4,7 @@ set -e
 
 # Default values
 CLUSTER_NAME="k8s-diagnostic-test"
+ROUTING_MODE="tunnel"  # Default Cilium routing mode (tunnel, native, direct)
 
 # Colors for output
 RED='\033[0;31m'  
@@ -33,11 +34,15 @@ Create a simple 3-node kind Kubernetes cluster with Cilium CNI for testing.
 
 OPTIONS:
     -n, --name NAME        Cluster name (default: k8s-diagnostic-test)
+    -r, --routing MODE     Cilium routing mode (default: tunnel)
+                           Available modes: tunnel, native, direct
     -h, --help             Show this help message
 
 EXAMPLES:
     $0                     # Create cluster with default settings
     $0 -n my-test-cluster  # Create cluster with custom name
+    $0 -r native           # Create cluster with native routing mode
+    $0 -r direct           # Create cluster with direct routing mode
 EOF
 }
 
@@ -46,6 +51,16 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -n|--name)
             CLUSTER_NAME="$2"
+            shift 2
+            ;;
+        -r|--routing)
+            ROUTING_MODE="$2"
+            # Validate routing mode
+            if [[ "$ROUTING_MODE" != "tunnel" && "$ROUTING_MODE" != "native" && "$ROUTING_MODE" != "direct" ]]; then
+                print_error "Invalid routing mode: $ROUTING_MODE"
+                print_error "Valid options are: tunnel, native, direct"
+                exit 1
+            fi
             shift 2
             ;;
         -h|--help)
@@ -211,10 +226,11 @@ install_cilium() {
         helm repo update
     fi
     
-    # Install Cilium using Helm
-    print_info "Installing Cilium v1.17.5..."
+    # Install Cilium using Helm with specified routing mode
+    print_info "Installing Cilium v1.17.5 with routingMode: ${ROUTING_MODE}..."
     helm install cilium cilium/cilium --version 1.17.5 \
-        --namespace kube-system
+        --namespace kube-system \
+        --set routingMode=${ROUTING_MODE}
     
     print_info "Waiting for Cilium to be ready..."
     
@@ -224,7 +240,7 @@ install_cilium() {
     # Wait for nodes to be ready now that CNI is installed
     kubectl wait --for=condition=Ready nodes --all --timeout=300s
     
-    print_info "Cilium CNI installed successfully"
+    print_info "Cilium CNI installed successfully with routing mode: ${ROUTING_MODE}"
 }
 
 # Show cluster information
@@ -232,6 +248,7 @@ show_cluster_info() {
     print_info "Test Kubernetes Cluster Information:"
     echo "====================================="
     echo "Cluster Name: $CLUSTER_NAME"
+    echo "Cilium Routing Mode: $ROUTING_MODE"
     echo ""
     
     print_info "Nodes:"
@@ -240,6 +257,11 @@ show_cluster_info() {
     
     print_info "Cilium Pods:"
     kubectl get pods -n kube-system -l k8s-app=cilium
+    echo ""
+    
+    # Display Cilium configuration
+    print_info "Cilium Configuration:"
+    kubectl get configmaps -n kube-system cilium-config -o yaml
     echo ""
     
     # Show current context

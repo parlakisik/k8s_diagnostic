@@ -98,8 +98,9 @@ All test resources will be created in the specified namespace (default: diagnost
 			logger.LogInfo("Using default kubectl context")
 		}
 
-		// Create tester
-		ctx := context.Background()
+		// Create tester with timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
 		logger.LogDebug("Creating diagnostic tester with kubeconfig: %s, namespace: %s", kubeconfig, namespace)
 		tester, err := diagnostic.NewTester(kubeconfig, namespace)
 		if err != nil {
@@ -514,4 +515,5 @@ func init() {
 	testCmd.Flags().String("test-group", "", "run tests by group: networking (more groups coming soon)")
 	testCmd.Flags().Bool("keep-namespace", false, "keep the test namespace after tests complete (useful for running multiple test sequences)")
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer")
+	// Removed the simulated failure flag as we now use actual Cilium misconfiguration via routing mode
 }
