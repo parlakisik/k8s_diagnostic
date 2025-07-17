@@ -4,7 +4,7 @@ set -e
 
 # Default values
 CLUSTER_NAME="k8s-diagnostic-test"
-ROUTING_MODE="tunnel"  # Default Cilium routing mode (tunnel, native, direct)
+ROUTING_MODE="tunnel"  # Default Cilium routing mode (tunnel, native)
 
 # Colors for output
 RED='\033[0;31m'  
@@ -35,14 +35,14 @@ Create a simple 3-node kind Kubernetes cluster with Cilium CNI for testing.
 OPTIONS:
     -n, --name NAME        Cluster name (default: k8s-diagnostic-test)
     -r, --routing MODE     Cilium routing mode (default: tunnel)
-                           Available modes: tunnel, native, direct
+                           Available modes: tunnel, native, bad-config
     -h, --help             Show this help message
 
 EXAMPLES:
     $0                     # Create cluster with default settings
     $0 -n my-test-cluster  # Create cluster with custom name
     $0 -r native           # Create cluster with native routing mode
-    $0 -r direct           # Create cluster with direct routing mode
+    $0 -r bad-config       # Create cluster with intentionally broken config
 EOF
 }
 
@@ -56,9 +56,9 @@ while [[ $# -gt 0 ]]; do
         -r|--routing)
             ROUTING_MODE="$2"
             # Validate routing mode
-            if [[ "$ROUTING_MODE" != "tunnel" && "$ROUTING_MODE" != "native" && "$ROUTING_MODE" != "direct" ]]; then
+            if [[ "$ROUTING_MODE" != "tunnel" && "$ROUTING_MODE" != "native" && "$ROUTING_MODE" != "bad-config" ]]; then
                 print_error "Invalid routing mode: $ROUTING_MODE"
-                print_error "Valid options are: tunnel, native, direct"
+                print_error "Valid options are: tunnel, native, bad-config"
                 exit 1
             fi
             shift 2
@@ -228,9 +228,141 @@ install_cilium() {
     
     # Install Cilium using Helm with specified routing mode
     print_info "Installing Cilium v1.17.5 with routingMode: ${ROUTING_MODE}..."
-    helm install cilium cilium/cilium --version 1.17.5 \
-        --namespace kube-system \
-        --set routingMode=${ROUTING_MODE}
+    
+    if [[ "$ROUTING_MODE" == "bad-config" ]]; then
+        # Install Cilium with a configuration that keeps pods running but breaks cross-node connectivity
+        print_info "Installing Cilium with intentionally broken configuration..."
+        
+        # This configuration achieves:
+        # 1. Cilium pods show as "Running" (not in CrashLoopBackOff)
+        # 2. Same-node pod connectivity works (entire test 1)
+        # 3. All other tests (services, DNS, NodePort, LoadBalancer) fail
+        # 4. Tests fail due to Cilium misconfiguration, not NetworkPolicy rules
+        
+        # Configuration History:
+        # ====================
+        # Attempt 1: Original configuration - BASELINE
+        # - kubeProxyReplacement=false
+        # - enableIPv4Masquerade=false
+        # - bpf.masquerade=false
+        # - autoDirectNodeRoutes=false
+        # - socketLB.enabled=false
+        # - nodePort.enabled=false
+        # - hostPort.enabled=false
+        # - externalIPs.enabled=false
+        # - hostServices.enabled=false
+        # Outcome: Cross-node connectivity fails as expected. Same-node works.
+        #
+        # Attempt 2: Testing with kubeProxyReplacement=true and port 10257
+        # - Added: kubeProxyReplacement=true 
+        # - Added: kubeProxyReplacementHealthzBindAddr='0.0.0.0:10257'
+        # Outcome: FAILED - Port binding conflict at 10257 (already in use by kube-proxy)
+        # Error: "listen tcp 0.0.0.0:10257: bind: address already in use"
+        #
+        # Attempt 3: Testing with kubeProxyReplacement=true and port 10256
+        # - Added: kubeProxyReplacement=true
+        # - Changed: kubeProxyReplacementHealthzBindAddr='0.0.0.0:10256'
+        # Outcome: FAILED - Cilium pods not ready, conflicts with kube-proxy
+        #
+        # Attempt 4: Back to basics
+        # - kubeProxyReplacement=false (no kube-proxy replacement to avoid conflicts)
+        # - enableIPv4Masquerade=false (disable masquerading)
+        # - bpf.masquerade=false (disable BPF-based masquerading)
+        # - autoDirectNodeRoutes=false (key setting that breaks cross-node connectivity)
+        # - Other features disabled for simplicity
+        # Outcome: Cross-node connectivity fails as expected. Same-node works.
+        #
+        # Attempt 5: Enable direct node routes
+        # - kubeProxyReplacement=false (no kube-proxy replacement to avoid conflicts)
+        # - enableIPv4Masquerade=false (disable masquerading)
+        # - bpf.masquerade=false (disable BPF-based masquerading)
+        # - autoDirectNodeRoutes=true (enabling direct node routes for cross-node connectivity)
+        # - Other features disabled for simplicity
+        # Outcome: UNEXPECTED - Cross-node connectivity still failed but service tests passed! We need
+        #          Test 1 to fully pass and all service tests to fail.
+        #
+        # Attempt 6: Switch to tunnel mode with autoDirectNodeRoutes
+        # - routingMode=tunnel (instead of native, to ensure cross-node connectivity) 
+        # - kubeProxyReplacement=false (to avoid conflicts)
+        # - enableIPv4Masquerade=true (to help with cross-node routing)
+        # - autoDirectNodeRoutes=true (to enable cross-node communication)
+        # - Other features disabled for simplicity
+        # Outcome: FAILED - Fatal error: "auto-direct-node-routes cannot be used with tunneling. 
+        #          Packets must be routed through the tunnel device."
+        #
+        # Attempt 7: Native mode with IPv4 masquerading but missing routing CIDR
+        # - routingMode=native (keep native routing)
+        # - kubeProxyReplacement=false (avoid conflicts with kube-proxy)
+        # - enableIPv4Masquerade=true (enable masquerading for cross-node routing)
+        # - autoDirectNodeRoutes=false (avoid direct routes which failed)
+        # - Other service features disabled to break Tests 2-6
+        # Outcome: FAILED - Fatal error: "native routing cidr must be configured with option 
+        #          --ipv4-native-routing-cidr in combination with --enable-ipv4=true 
+        #          --enable-ipv4-masquerade=true --enable-ip-masq-agent=false --routing-mode=native"
+        #
+        # Attempt 8: Native mode with IPv4 masquerading and routing CIDR
+        # - routingMode=native (keep native routing)
+        # - kubeProxyReplacement=false (avoid conflicts with kube-proxy)
+        # - enableIPv4Masquerade=true (enable masquerading for cross-node routing)
+        # - ipv4NativeRoutingCIDR="10.244.0.0/16" (match pod subnet from kind config)
+        # - autoDirectNodeRoutes=true (enable direct routes now that we have proper CIDR)
+        # - Other service features disabled to break Tests 2-6
+        # Outcome: UNEXPECTED - All tests pass including service tests. This is because with
+        #          kubeProxyReplacement=false, the regular kube-proxy is still handling services.
+        #
+        # Current configuration (Attempt 9): Native mode with kube-proxy replacement
+        # - routingMode=native (keep native routing)
+        # - kubeProxyReplacement=true (fully disable kube-proxy and use Cilium for services)
+        # - enableIPv4Masquerade=true (enable masquerading for cross-node routing)
+        # - ipv4NativeRoutingCIDR="10.244.0.0/16" (match pod subnet from kind config)
+        # - kubeProxyReplacementHealthzBindAddr="127.0.0.1:9999" (avoid port conflicts)
+        # - autoDirectNodeRoutes=true (enable direct routes for cross-node connectivity)
+        # - Other service features disabled to break Tests 2-6
+        # Expected outcome: Test 1 should pass fully (pod connectivity works),
+        #                   Tests 2-6 should fail (services broken by disabled features)
+        
+        # Get the Kubernetes API server host and port from the current context
+        api_server=$(kubectl config view -o jsonpath="{.clusters[?(@.name == '$(kubectl config current-context)')].cluster.server}" | sed 's|https://||')
+        api_host=$(echo $api_server | cut -d: -f1)
+        api_port=$(echo $api_server | cut -d: -f2)
+        
+        print_info "Using Kubernetes API server: $api_host:$api_port"
+        
+        helm install cilium cilium/cilium --version 1.17.5 \
+            --namespace kube-system \
+            --set routingMode=native \
+            --set ipam.mode=kubernetes \
+            --set kubeProxyReplacement=true \
+            --set enableIPv4Masquerade=true \
+            --set ipv4NativeRoutingCIDR="10.244.0.0/16" \
+            --set kubeProxyReplacementHealthzBindAddr="127.0.0.1:9999" \
+            --set bpf.masquerade=false \
+            --set autoDirectNodeRoutes=true \
+            --set socketLB.enabled=false \
+            --set nodePort.enabled=false \
+            --set hostPort.enabled=false \
+            --set externalIPs.enabled=false \
+            --set hostServices.enabled=false
+
+        # Create diagnostic-test namespace where tests will run
+        kubectl create namespace diagnostic-test || true
+        
+        print_info "Cilium configured to allow Pod-to-Pod connectivity (Test 1) but break Services, DNS, and other tests"
+    else
+        # Enhanced tunnel mode configuration for good cluster to ensure ALL tests pass
+        print_info "Installing Cilium with proper configuration for all tests to pass..."
+        helm install cilium cilium/cilium --version 1.17.5 \
+            --namespace kube-system \
+            --set routingMode=${ROUTING_MODE} \
+            --set ipam.mode=kubernetes \
+            --set kubeProxyReplacement=true \
+            --set kubeProxyReplacementHealthzBindAddr='0.0.0.0:10256' \
+            --set externalIPs.enabled=true \
+            --set nodePort.enabled=true \
+            --set hostPort.enabled=true \
+            --set bpf.masquerade=true \
+            --set enableIPv4Masquerade=true
+    fi
     
     print_info "Waiting for Cilium to be ready..."
     
