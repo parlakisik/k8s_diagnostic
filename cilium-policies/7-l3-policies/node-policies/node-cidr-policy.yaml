@@ -1,0 +1,13 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "node-cidr-policy"
+  namespace: node-policy-test
+spec:
+  description: "Allow traffic only from pods on cluster-2-worker node using CIDR approach"
+  endpointSelector:
+    matchLabels:
+      app: database
+  ingress:
+  - fromCIDR:
+    - "10.244.1.0/24"  # This CIDR covers the IP range for cluster-2-worker pods

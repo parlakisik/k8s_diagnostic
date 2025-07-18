@@ -1,0 +1,13 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "same-namespace-traffic"
+spec:
+  description: "Allow traffic only from pods in the same namespace"
+  endpointSelector:
+    matchLabels:
+      run: web
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: policy-test  # This selects all pods in the policy-test namespace
