@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -1149,6 +1152,428 @@ func (t *Tester) TestNodePortServiceConnectivity(ctx context.Context) TestResult
 	}
 }
 
+// applyNetworkPolicy applies a Cilium network policy from a file
+func (t *Tester) applyNetworkPolicy(ctx context.Context, policyFilePath string) (string, error) {
+	// Read the policy file content
+	policyContent, err := os.ReadFile(policyFilePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read policy file %s: %v", policyFilePath, err)
+	}
+
+	// Create a temporary file to store the kubectl command output
+	tempFile, err := os.CreateTemp("", "cilium-policy-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer tempFile.Close()
+
+	if _, err := tempFile.Write(policyContent); err != nil {
+		return "", fmt.Errorf("failed to write to temp file: %v", err)
+	}
+
+	// Apply the policy using kubectl
+	cmd := exec.Command("kubectl", "apply", "-f", tempFile.Name())
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to apply network policy: %v, output: %s", err, output)
+	}
+
+	// Extract policy name from output
+	outputStr := string(output)
+	nameMatches := regexp.MustCompile(`ciliumclusterwidenetworkpolicy.cilium.io/([^\s]+) created`).FindStringSubmatch(outputStr)
+	if len(nameMatches) < 2 {
+		return "", fmt.Errorf("could not extract policy name from output: %s", outputStr)
+	}
+
+	policyName := nameMatches[1]
+	return policyName, nil
+}
+
+// deleteNetworkPolicy removes a Cilium network policy by name
+func (t *Tester) deleteNetworkPolicy(ctx context.Context, policyName string) error {
+	cmd := exec.Command("kubectl", "delete", "ciliumclusterwidenetworkpolicy", policyName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to delete network policy %s: %v, output: %s", policyName, err, output)
+	}
+	return nil
+}
+
+// createTestNamespace creates a namespace with a specific name if it doesn't exist
+func (t *Tester) createTestNamespace(ctx context.Context, namespaceName string) error {
+	// Check if namespace exists
+	_, err := t.clientset.CoreV1().Namespaces().Get(ctx, namespaceName, metav1.GetOptions{})
+	if err == nil {
+		// Namespace already exists
+		return nil
+	}
+
+	// Create the namespace
+	namespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespaceName,
+		},
+	}
+	_, err = t.clientset.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create namespace %s: %v", namespaceName, err)
+	}
+	return nil
+}
+
+// testNetworkPolicy is a helper function that tests the effect of applying a network policy
+func (t *Tester) testNetworkPolicy(
+	ctx context.Context,
+	policyName string,
+	policyFile string,
+	expectConnectivityAfterPolicy bool, // true if policy should allow connectivity, false if it should block
+	details *[]string,
+) TestResult {
+	// Define test namespaces with unique suffixes to avoid collisions between tests
+	timestamp := time.Now().Unix()
+	primaryNamespace := t.namespace
+	secondNamespace := fmt.Sprintf("%s-secondary-%d", t.namespace, timestamp)
+	webPodName := "web-policy-test"
+	clientPodName := "client-policy-test"
+
+	// Create secondary namespace
+	if err := t.createTestNamespace(ctx, secondNamespace); err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create secondary namespace %s: %v", secondNamespace, err),
+			Details: *details,
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ Created secondary namespace %s for cross-namespace testing", secondNamespace))
+
+	// Create web pod in primary namespace with label run: web
+	webPod, err := t.clientset.CoreV1().Pods(primaryNamespace).Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: webPodName,
+			Labels: map[string]string{
+				"run": "web",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "nginx",
+					Image: "nginx:alpine",
+					Ports: []corev1.ContainerPort{
+						{
+							ContainerPort: 80,
+						},
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.clientset.CoreV1().Namespaces().Delete(ctx, secondNamespace, metav1.DeleteOptions{})
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create pod %s in namespace %s: %v", webPodName, primaryNamespace, err),
+			Details: *details,
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ Created web pod %s in namespace %s with label 'run: web'", webPodName, primaryNamespace))
+
+	// Create client pod in secondary namespace with label run: client
+	_, err = t.clientset.CoreV1().Pods(secondNamespace).Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clientPodName,
+			Labels: map[string]string{
+				"run": "client",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "netshoot",
+					Image: "nicolaka/netshoot",
+					Command: []string{
+						"sleep",
+						"3600",
+					},
+				},
+			},
+			RestartPolicy: corev1.RestartPolicyNever,
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.cleanupPod(ctx, webPodName)
+		t.clientset.CoreV1().Namespaces().Delete(ctx, secondNamespace, metav1.DeleteOptions{})
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create pod %s in namespace %s: %v", clientPodName, secondNamespace, err),
+			Details: *details,
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ Created client pod %s in namespace %s with label 'run: client'", clientPodName, secondNamespace))
+
+	// Define cleanup function for both pods and the secondary namespace
+	cleanupFunc := func() {
+		t.cleanupPod(ctx, webPodName)
+		t.clientset.CoreV1().Pods(secondNamespace).Delete(ctx, clientPodName, metav1.DeleteOptions{})
+		// Wait a moment before cleaning up the namespace
+		time.Sleep(2 * time.Second)
+		t.clientset.CoreV1().Namespaces().Delete(ctx, secondNamespace, metav1.DeleteOptions{})
+	}
+
+	// Wait for pods to be ready
+	if err := t.WaitForPodReadyOrCleanup(ctx, webPodName, 120*time.Second, cleanupFunc, details); err != nil {
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Web pod %s did not become ready: %v", webPodName, err),
+			Details: *details,
+		}
+	}
+
+	// Wait for client pod in the secondary namespace to be ready
+	podReady := false
+	maxRetries := 60 // 60 * 2 seconds = 120 seconds timeout
+	for i := 0; i < maxRetries; i++ {
+		pod, err := t.clientset.CoreV1().Pods(secondNamespace).Get(ctx, clientPodName, metav1.GetOptions{})
+		if err == nil && pod.Status.Phase == corev1.PodRunning {
+			// Check if it's actually ready
+			for _, condition := range pod.Status.Conditions {
+				if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+					podReady = true
+					break
+				}
+			}
+		}
+		if podReady {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	if !podReady {
+		cleanupFunc()
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Client pod %s in namespace %s did not become ready in time", clientPodName, secondNamespace),
+			Details: *details,
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ Client pod %s in namespace %s is ready", clientPodName, secondNamespace))
+
+	// Get web pod IP for connectivity test
+	webPodIP := webPod.Status.PodIP
+	if webPodIP == "" {
+		// Try to get the IP again if it wasn't set initially
+		refreshedPod, err := t.clientset.CoreV1().Pods(primaryNamespace).Get(ctx, webPodName, metav1.GetOptions{})
+		if err != nil || refreshedPod.Status.PodIP == "" {
+			cleanupFunc()
+			return TestResult{
+				Success: false,
+				Message: fmt.Sprintf("Could not get IP for pod %s in namespace %s", webPodName, primaryNamespace),
+				Details: *details,
+			}
+		}
+		webPodIP = refreshedPod.Status.PodIP
+	}
+	*details = append(*details, fmt.Sprintf("✓ Web pod IP: %s", webPodIP))
+
+	// Test connectivity before applying policy
+	prePingResult, prePingErr := t.pingFromPodToNamespace(ctx, clientPodName, secondNamespace, webPodIP)
+	if prePingErr != nil {
+		*details = append(*details, fmt.Sprintf("✗ Pre-policy connectivity test failed: %v", prePingErr))
+		*details = append(*details, fmt.Sprintf("  Output: %s", prePingResult))
+	} else {
+		if strings.Contains(strings.ToLower(prePingResult), "0% packet loss") {
+			*details = append(*details, "✓ Pre-policy connectivity test successful (as expected in default setup)")
+		} else {
+			*details = append(*details, fmt.Sprintf("⚠️ Pre-policy connectivity has issues: %s", prePingResult))
+		}
+	}
+
+	// Apply the network policy
+	*details = append(*details, fmt.Sprintf("ℹ️ Applying policy from: %s", policyFile))
+
+	appliedPolicyName, err := t.applyNetworkPolicy(ctx, policyFile)
+	if err != nil {
+		cleanupFunc()
+		return TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to apply network policy: %v", err),
+			Details: *details,
+		}
+	}
+	*details = append(*details, fmt.Sprintf("✓ Applied Cilium policy: %s", appliedPolicyName))
+
+	// Wait a moment for the policy to be properly applied
+	time.Sleep(5 * time.Second)
+
+	// Test connectivity after applying policy
+	// Use shorter timeout context since we expect this to fail for deny policies
+	pingTimeoutCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer pingCancel()
+
+	postPingResult, postPingErr := t.pingFromPodToNamespace(pingTimeoutCtx, clientPodName, secondNamespace, webPodIP)
+
+	// Also test HTTP connectivity to web pod with shorter timeout
+	httpTimeoutCtx, httpCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer httpCancel()
+
+	httpResult, _, httpErr := t.testHTTPConnectivityWithNamespace(httpTimeoutCtx, clientPodName, secondNamespace, webPodIP)
+
+	// Clean up resources
+	*details = append(*details, "ℹ️ Cleaning up resources...")
+
+	// Delete the network policy
+	if err := t.deleteNetworkPolicy(ctx, appliedPolicyName); err != nil {
+		*details = append(*details, fmt.Sprintf("⚠️ Failed to delete network policy: %v", err))
+	} else {
+		*details = append(*details, "✓ Network policy deleted")
+	}
+
+	// Call the cleanup function for pods and namespace
+	cleanupFunc()
+	*details = append(*details, "✓ All test pods and namespaces cleaned up")
+
+	// Analyze ping results
+	pingSucceeded := false
+	if postPingErr == nil && strings.Contains(strings.ToLower(postPingResult), "0% packet loss") {
+		pingSucceeded = true
+	}
+
+	// Analyze HTTP results
+	httpSucceeded := false
+	if httpErr == nil {
+		success, _ := evaluateHTTPStatusCode(httpResult)
+		httpSucceeded = success
+	}
+
+	// Determine if connectivity is working
+	connectivityWorking := pingSucceeded || httpSucceeded
+
+	// Evaluate test results based on expected connectivity
+	if expectConnectivityAfterPolicy {
+		// For "allow" policy test, we expect connectivity to work after policy application
+		if connectivityWorking {
+			return TestResult{
+				Success: true,
+				Message: "Policy test passed - connectivity working as expected with policy applied",
+				Details: *details,
+			}
+		} else {
+			return TestResult{
+				Success: false,
+				Message: "Policy test failed - expected connectivity but found it blocked",
+				Details: *details,
+				DetailedDiagnostics: &DetailedDiagnostics{
+					FailureStage:   "Policy Test - Unexpected Connectivity Loss",
+					TechnicalError: postPingErr.Error(),
+					TroubleshootingHints: []string{
+						"Verify Cilium is running properly: kubectl get pods -n kube-system | grep cilium",
+						"Check if policy was correctly applied with: kubectl describe ciliumclusterwidenetworkpolicies",
+						"Verify that the policy allows the expected traffic pattern",
+					},
+				},
+			}
+		}
+	} else {
+		// For "deny" policy test, we expect connectivity to be blocked after policy application
+		if !connectivityWorking {
+			return TestResult{
+				Success: true,
+				Message: "Policy test passed - connectivity properly blocked by policy",
+				Details: *details,
+			}
+		} else {
+			return TestResult{
+				Success: false,
+				Message: "Policy test failed - expected traffic to be blocked but it wasn't",
+				Details: *details,
+				DetailedDiagnostics: &DetailedDiagnostics{
+					FailureStage: "Policy Test - Unexpected Connectivity",
+					TroubleshootingHints: []string{
+						"Verify that policy was applied correctly with kubectl get ciliumclusterwidenetworkpolicies",
+						"Check if the policy rules are correctly targeting the right pods",
+					},
+				},
+			}
+		}
+	}
+}
+
+// TestAcceptingAllPods tests the allow-all policy from Cilium
+func (t *Tester) TestAcceptingAllPods(ctx context.Context) TestResult {
+	var details []string
+
+	// Use the reusable helper function with the allow-all policy
+	return t.testNetworkPolicy(
+		ctx,
+		"allow-all-traffic",
+		"cilium-policies/1-allow-all/allow-all-policy.yaml",
+		true, // Expect connectivity to succeed after policy application
+		&details,
+	)
+}
+
+// TestRejectingAllPods tests the deny-all policy from Cilium
+func (t *Tester) TestRejectingAllPods(ctx context.Context) TestResult {
+	var details []string
+
+	// Use the reusable helper function with the deny-all policy
+	return t.testNetworkPolicy(
+		ctx,
+		"deny-all-traffic",
+		"cilium-policies/2-deny-all/deny-all-policy.yaml",
+		false, // Expect connectivity to fail after policy application
+		&details,
+	)
+}
+
+// execInPod executes a command in a pod and returns the output
+func (t *Tester) execInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, error) {
+	req := t.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec")
+
+	req.VersionedParams(&corev1.PodExecOptions{
+		Container: containerName,
+		Command:   command,
+		Stdout:    true,
+		Stderr:    true,
+	}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create executor: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	output := stdout.String()
+	if err != nil && stderr.Len() > 0 {
+		return output + "\nSTDERR: " + stderr.String(), err
+	}
+
+	return output, err
+}
+
+// pingFromPodToNamespace executes ping from a pod in one namespace to an IP
+func (t *Tester) pingFromPodToNamespace(ctx context.Context, fromPod, fromNamespace, targetIP string) (string, error) {
+	return t.execInPod(ctx, fromNamespace, fromPod, "netshoot",
+		[]string{"ping", "-c", "2", "-W", "2", "-i", "0.5", targetIP})
+}
+
+// pingFromPod executes ping command from one pod to another
+func (t *Tester) pingFromPod(ctx context.Context, fromPod, targetIP string) (string, error) {
+	return t.execInPod(ctx, t.namespace, fromPod, "netshoot",
+		[]string{"ping", "-c", "3", "-W", "3", "-i", "1", targetIP})
+}
+
 // TestLoadBalancerServiceConnectivity tests LoadBalancer service connectivity
 func (t *Tester) TestLoadBalancerServiceConnectivity(ctx context.Context) TestResult {
 	var details []string
@@ -1590,39 +2015,7 @@ func (t *Tester) WaitForPodReadyOrCleanup(
 	return nil
 }
 
-// pingFromPod executes ping command from one pod to another
-func (t *Tester) pingFromPod(ctx context.Context, fromPod, targetIP string) (string, error) {
-	req := t.clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(fromPod).
-		Namespace(t.namespace).
-		SubResource("exec")
-
-	req.VersionedParams(&corev1.PodExecOptions{
-		Container: "netshoot",
-		Command:   []string{"ping", "-c", "3", "-W", "3", "-i", "1", targetIP},
-		Stdout:    true,
-		Stderr:    true,
-	}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
-	if err != nil {
-		return "", fmt.Errorf("failed to create executor: %v", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-
-	output := stdout.String()
-	if err != nil && stderr.Len() > 0 {
-		return output + "\nSTDERR: " + stderr.String(), err
-	}
-
-	return output, err
-}
+// Already refactored with execInPod
 
 // cleanupPod removes a single pod
 func (t *Tester) cleanupPod(ctx context.Context, podName string) {
@@ -1766,68 +2159,23 @@ func (t *Tester) getServiceIP(ctx context.Context, serviceName string) (string, 
 	return service.Spec.ClusterIP, nil
 }
 
-// testHTTPConnectivityWithStatusCode tests HTTP connectivity and returns status code
-func (t *Tester) testHTTPConnectivityWithStatusCode(ctx context.Context, podName, target string) (string, string, error) {
-	req := t.clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(t.namespace).
-		SubResource("exec")
+// testHTTPConnectivityWithNamespace tests HTTP connectivity from pod in specific namespace and returns status code
+func (t *Tester) testHTTPConnectivityWithNamespace(ctx context.Context, podName, namespace, target string) (string, string, error) {
+	output, err := t.execInPod(ctx, namespace, podName, "netshoot",
+		[]string{"curl", "-s", "--connect-timeout", "3", "--max-time", "5", "-o", "/dev/null", "-w", "%{http_code}", fmt.Sprintf("http://%s", target)})
 
-	req.VersionedParams(&corev1.PodExecOptions{
-		Container: "netshoot",
-		Command:   []string{"curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", fmt.Sprintf("http://%s", target)},
-		Stdout:    true,
-		Stderr:    true,
-	}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
-	if err != nil {
-		return "", "", fmt.Errorf("failed to create executor: %v", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-
-	statusCode := strings.TrimSpace(stdout.String())
+	statusCode := strings.TrimSpace(output)
 	return statusCode, "", err
+}
+
+// testHTTPConnectivityWithStatusCode tests HTTP connectivity and returns status code (uses default namespace)
+func (t *Tester) testHTTPConnectivityWithStatusCode(ctx context.Context, podName, target string) (string, string, error) {
+	return t.testHTTPConnectivityWithNamespace(ctx, podName, t.namespace, target)
 }
 
 // testDNSResolution tests if the service can be resolved via DNS
 func (t *Tester) testDNSResolution(ctx context.Context, podName, serviceName string) (string, error) {
-	req := t.clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(t.namespace).
-		SubResource("exec")
-
-	req.VersionedParams(&corev1.PodExecOptions{
-		Container: "netshoot",
-		Command:   []string{"nslookup", serviceName},
-		Stdout:    true,
-		Stderr:    true,
-	}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
-	if err != nil {
-		return "", fmt.Errorf("failed to create executor: %v", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
-		Stdout: &stdout,
-		Stderr: &stderr,
-	})
-
-	output := stdout.String()
-	if err != nil && stderr.Len() > 0 {
-		return output + "\nSTDERR: " + stderr.String(), err
-	}
-
-	return output, err
+	return t.execInPod(ctx, t.namespace, podName, "netshoot", []string{"nslookup", serviceName})
 }
 
 // cleanupServiceResources removes all service-related test resources
