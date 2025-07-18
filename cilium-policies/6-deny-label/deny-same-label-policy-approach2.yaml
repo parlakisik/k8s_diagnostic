@@ -1,0 +1,16 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "deny-same-label-traffic-alt"
+spec:
+  description: "Deny traffic between pods with matching labels (alternative approach)"
+  endpointSelector:
+    matchLabels:
+      app: frontend
+  ingress:
+  - fromEndpoints:
+    - matchExpressions:
+      - key: app
+        operator: NotIn
+        values:
+        - frontend
