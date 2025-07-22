@@ -27,17 +27,20 @@ type TestEntryWithConfig struct {
 
 // Available tests registry
 var availableTests = map[string]TestEntry{
-	"pod-to-pod":     {"Pod-to-Pod Connectivity", nil}, // Special handling with config
-	"service-to-pod": {"Service to Pod Connectivity", nil},
-	"cross-node":     {"Cross-Node Service Connectivity", nil},
-	"dns":            {"DNS Resolution", nil},
-	"nodeport":       {"NodePort Service Connectivity", nil},
-	"loadbalancer":   {"LoadBalancer Service Connectivity", nil},
+	"pod-to-pod":         {"Pod-to-Pod Connectivity", nil}, // Special handling with config
+	"service-to-pod":     {"Service to Pod Connectivity", nil},
+	"cross-node":         {"Cross-Node Service Connectivity", nil},
+	"dns":                {"DNS Resolution", nil},
+	"nodeport":           {"NodePort Service Connectivity", nil},
+	"loadbalancer":       {"LoadBalancer Service Connectivity", nil},
+	"accepting-all-pods": {"Accepting All Requests from Other Pods", nil},
+	"rejecting-all-pods": {"Rejecting All Requests from Other Pods", nil},
 }
 
 // Test groups for logical organization
 var testGroups = map[string][]string{
 	"networking": {"pod-to-pod", "service-to-pod", "cross-node", "dns", "nodeport", "loadbalancer"},
+	"policies":   {"accepting-all-pods", "rejecting-all-pods"},
 	// Future groups will be added here, e.g.:
 	// "firewall": {"ingress-policy", "egress-policy"},
 	// "storage": {"pv-binding", "pvc-access"},
@@ -54,6 +57,7 @@ var testCmd = &cobra.Command{
 
 Available test groups:
 - networking: All network connectivity tests
+- policies: Network policy tests
 
 Networking tests include:
 - Pod-to-Pod Connectivity: Creates two netshoot pods on different worker nodes and tests ping connectivity
@@ -62,6 +66,10 @@ Networking tests include:
 - DNS Resolution: Tests service DNS resolution including FQDN, short names, and pod-to-pod DNS
 - NodePort Service Connectivity: Tests external access to services through node ports
 - LoadBalancer Service Connectivity: Tests LoadBalancer service functionality
+
+Policies tests include:
+- Accepting All Requests from Other Pods: Tests the allow-all Cilium policy that permits traffic between all pods
+- Rejecting All Requests from Other Pods: Tests the deny-all Cilium policy that blocks traffic between pods
 
 The tool will use the current kubectl context unless --kubeconfig is specified.
 All test resources will be created in the specified namespace (default: diagnostic-test).`,
@@ -98,8 +106,9 @@ All test resources will be created in the specified namespace (default: diagnost
 			logger.LogInfo("Using default kubectl context")
 		}
 
-		// Create tester
-		ctx := context.Background()
+		// Create tester with timeout context
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
 		logger.LogDebug("Creating diagnostic tester with kubeconfig: %s, namespace: %s", kubeconfig, namespace)
 		tester, err := diagnostic.NewTester(kubeconfig, namespace)
 		if err != nil {
@@ -144,9 +153,19 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		// Check for test group first
 		if testGroup != "" {
+			// Debug: Print all available test groups
+			fmt.Printf("DEBUG: Available test groups: ")
+			for groupName := range testGroups {
+				fmt.Printf("%s ", groupName)
+			}
+			fmt.Printf("\n")
+			fmt.Printf("DEBUG: Requested test group: '%s'\n", testGroup)
+
 			if group, exists := testGroups[testGroup]; exists {
 				testsToRun = group
 				logger.LogInfo("Running tests in group: %s", testGroup)
+				// Debug: Print tests in the group
+				fmt.Printf("DEBUG: Tests in group '%s': %v\n", testGroup, group)
 			} else {
 				fmt.Printf("WARNING: Unknown test group '%s' - using defaults\n", testGroup)
 				logger.LogWarning("Unknown test group '%s' - using defaults", testGroup)
@@ -187,6 +206,10 @@ All test resources will be created in the specified namespace (default: diagnost
 				executeTimedTest(testNum, testEntry.Name, tester.TestNodePortServiceConnectivity, ctx, verbose, &timedResults, &testNames)
 			case "loadbalancer":
 				executeTimedTest(testNum, testEntry.Name, tester.TestLoadBalancerServiceConnectivity, ctx, verbose, &timedResults, &testNames)
+			case "accepting-all-pods":
+				executeTimedTest(testNum, testEntry.Name, tester.TestAcceptingAllPods, ctx, verbose, &timedResults, &testNames)
+			case "rejecting-all-pods":
+				executeTimedTest(testNum, testEntry.Name, tester.TestRejectingAllPods, ctx, verbose, &timedResults, &testNames)
 			}
 			testNum++
 		}
@@ -514,4 +537,5 @@ func init() {
 	testCmd.Flags().String("test-group", "", "run tests by group: networking (more groups coming soon)")
 	testCmd.Flags().Bool("keep-namespace", false, "keep the test namespace after tests complete (useful for running multiple test sequences)")
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run: pod-to-pod,service-to-pod,cross-node,dns,nodeport,loadbalancer")
+	// Removed the simulated failure flag as we now use actual Cilium misconfiguration via routing mode
 }

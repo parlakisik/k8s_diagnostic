@@ -1,0 +1,13 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "deny-all-traffic"
+spec:
+  description: "Deny all traffic from client to web"
+  endpointSelector:
+    matchLabels:
+      run: web
+  ingressDeny:
+  - fromEndpoints:
+    - matchLabels:
+        run: client

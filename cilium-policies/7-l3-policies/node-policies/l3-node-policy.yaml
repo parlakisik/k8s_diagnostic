@@ -1,0 +1,14 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "l3-node-policy"
+  namespace: node-test
+spec:
+  description: "Allow traffic from cluster-2-worker only"
+  endpointSelector:
+    matchLabels:
+      app: database
+  ingress:
+  - fromNodes:
+    - matchLabels:
+        kubernetes.io/hostname: cluster-2-worker

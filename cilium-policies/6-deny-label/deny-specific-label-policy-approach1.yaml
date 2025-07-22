@@ -1,0 +1,13 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "deny-specific-label"
+spec:
+  description: "Deny traffic from pods with label 'green' to pods with label 'red'"
+  endpointSelector:
+    matchLabels:
+      app: red
+  ingressDeny:
+  - fromEndpoints:
+    - matchLabels:
+        app: green
