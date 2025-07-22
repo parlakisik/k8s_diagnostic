@@ -1,0 +1,14 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "traditional-node-selector"
+  namespace: node-selector-test
+spec:
+  description: "Allow traffic only from cluster-2-worker node"
+  endpointSelector:
+    matchLabels:
+      app: backend
+  ingress:
+  - fromNodes:
+    - matchLabels:
+        kubernetes.io/hostname: cluster-2-worker

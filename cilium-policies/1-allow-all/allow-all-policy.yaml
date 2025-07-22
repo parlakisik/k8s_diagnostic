@@ -1,0 +1,10 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "allow-all-traffic"
+spec:
+  description: "Allow all traffic between all pods"
+  endpointSelector: {} # Empty selector means "all pods"
+  ingress:
+  - fromEndpoints:
+    - {} # Empty selector means "from all pods"

@@ -1,0 +1,13 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "l3-cidr-egress"
+spec:
+  description: "Control egress traffic to specific CIDR blocks"
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  - toCIDR:
+    - "10.244.0.0/16"  # Allow traffic to pod network
+    - "8.8.8.8/32"     # Allow traffic to specific external IP (e.g., Google DNS)
