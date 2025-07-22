@@ -1,0 +1,16 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "node-based-policy-clusterwide"
+spec:
+  description: "Allow traffic only from pods on cluster-2-worker node"
+  endpointSelector:
+    matchLabels:
+      app: database
+  ingress:
+  - fromEntities:
+    - remote-node
+    - host
+  - fromEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.nodeName: cluster-2-worker

@@ -42,3 +42,12 @@ build/
 # Temporary files
 *.tmp
 *.log
+
+# Cilium policy files (now tracked)
+# cilium-policies/ - removed from gitignore
+
+# EKS-A testing files
+eks-a-policy-tests/
+
+# Demo script
+demo_clusters.sh
