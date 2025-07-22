@@ -6,17 +6,20 @@ A CLI tool for testing network connectivity within Kubernetes clusters using rea
 
 Recent updates have significantly improved the user experience and diagnostic capabilities:
 
+- **🔒 Comprehensive Cilium Network Policies**: Complete library of Cilium NetworkPolicies from basic allow/deny to advanced L3/L4 filtering
+- **🧪 Network Policy Testing Framework**: Testing tools for validating Cilium policy behavior in real clusters
 - **📊 Enhanced Logging System**: Multi-level logging (DEBUG, INFO, WARNING, ERROR) with colored output and comprehensive log files
 - **📝 Detailed Diagnostics**: Improved error reporting with context-aware logging and file/line tracking
 - **📁 Structured Logs**: All terminal output captured in timestamped log files for later analysis
 
 ## **Main Branch - Core Foundation**
 
-This is the **main/base branch** containing the foundational 4 connectivity tests that form the core of k8s-diagnostic. This branch provides reliable, battle-tested network diagnostics for any Kubernetes cluster.
+This is the **main/base branch** containing the foundational connectivity tests and network policies that form the core of k8s-diagnostic. This branch provides reliable, battle-tested network diagnostics for any Kubernetes cluster.
 
 
 ### **Core Features (This Branch):**
 - **6 Comprehensive Tests**: Pod-to-Pod, Service-to-Pod, Cross-Node Service, DNS Resolution, NodePort Service, LoadBalancer Service
+- **Cilium Network Policies Library**: Complete collection of Cilium CNI network policies organized by type and use case
 - **Enhanced Visual Output**: Emoji-based UI for clearer, more engaging test results 🎨
 - **Comprehensive Logging**: Multi-level logging with DEBUG, INFO, WARNING, ERROR levels
 - **Log File Generation**: All output captured in timestamped log files for debugging
@@ -32,6 +35,113 @@ This project provides:
 - **`build_test_k8s.sh`** - Script to create a test Kubernetes cluster using kind with Cilium CNI
 - **`delete_test_k8s.sh`** - Script to delete test clusters
 - **`k8s-diagnostic`** - CLI tool for running comprehensive diagnostic tests in any Kubernetes cluster
+- **`cilium-policies/`** - Library of Cilium network policies with documentation and testing tools
+
+## Cilium Network Policies Library
+
+The repository now includes an extensive collection of Cilium network policies organized by type and complexity. These policies serve as both educational examples and practical templates for securing Kubernetes clusters.
+
+### Policies Collection Overview
+
+1. **Basic Allow/Deny Policies**
+   - `1-allow-all`: Allow all traffic (baseline policy)
+   - `2-deny-all`: Deny all traffic (zero-trust baseline)
+
+2. **Namespace-based Policies**
+   - `3-same-namespace`: Allow traffic within the same namespace
+   - `4-deny-namespace`: Deny traffic from specific namespaces
+
+3. **Label-based Policies**
+   - `5-same-label`: Allow traffic between pods with matching labels
+   - `6-deny-label`: Deny traffic based on pod labels
+
+4. **L3 (Network Layer) Policies**
+   - `7-l3-policies/cidr-policies`: CIDR-based ingress and egress filtering
+   - `7-l3-policies/node-policies`: Node-based selectors and node CIDR targeting
+
+5. **L4 (Transport Layer) Policies**
+   - `8-l4-policies/basic-port-policies`: TCP/UDP port-based filtering
+   - `8-l4-policies/http-api-policies`: HTTP-specific policies (methods, paths, headers)
+   - `8-l4-policies/advanced-l4-policies`: Combined L3/L4 policies and service targeting
+
+### Using the Cilium Policies
+
+Each policy directory contains:
+- README.md with detailed explanations
+- YAML policy definitions ready to apply
+- Testing instructions and expected behavior
+
+To test policies:
+```bash
+# Test specific L4 policy types
+./cilium-policies/8-l4-policies/test-l4-policies.sh basic-port
+./cilium-policies/8-l4-policies/test-l4-policies.sh http-api
+./cilium-policies/8-l4-policies/test-l4-policies.sh advanced
+
+# Test all L4 policy types
+./cilium-policies/8-l4-policies/test-l4-policies.sh all
+```
+
+### L4 Policy Types
+
+#### Basic Port Policies
+Control traffic based on TCP/UDP port numbers:
+```yaml
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "tcp-port-ingress-policy"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        app: frontend
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+```
+
+#### HTTP API Policies
+Fine-grained control over HTTP traffic by inspecting URL paths, methods, and headers:
+```yaml
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+spec:
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      rules:
+        http:
+        - method: "GET"
+          path: "/api/v1/health"
+```
+
+#### Combined L3/L4 Policies
+Merge IP and port-based filtering for defense in depth:
+```yaml
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+spec:
+  endpointSelector:
+    matchLabels:
+      app: database
+  ingress:
+  - fromCIDR:
+    - "10.244.0.0/16"
+    toPorts:
+    - ports:
+      - port: "3306"
+        protocol: TCP
+```
 
 ## New User Guide: Getting Started
 
@@ -124,6 +234,7 @@ When you're done testing, clean up your resources:
 - Try running individual tests with `--test-list pod-to-pod,dns`
 - Test against your production cluster by pointing to your kubeconfig
 - Review the JSON reports in `test_results/` for detailed analysis
+- Experiment with different Cilium network policies in the `cilium-policies/` directory
 
 ## Features
 
@@ -150,6 +261,7 @@ When you're done testing, clean up your resources:
 - **Namespace Management**: Isolated testing environment with proper cleanup
 - **Verbose Reporting**: Detailed test steps with equivalent kubectl commands
 - **Educational Output**: Shows manual kubectl equivalents for learning
+- **Network Policy Library**: Comprehensive collection of ready-to-use Cilium network policies
 
 ## Detailed Test Walkthroughs
 
@@ -524,6 +636,18 @@ make install
 ./k8s-diagnostic test --kubeconfig /path/to/kubeconfig
 ```
 
+### 4. Test Cilium Network Policies
+
+```bash
+# Apply a basic allow-all policy
+kubectl apply -f cilium-policies/1-allow-all/allow-all-policy.yaml
+
+# Apply a deny-all policy
+kubectl apply -f cilium-policies/2-deny-all/deny-all-policy.yaml
+
+# Test L4 policies
+./cilium-policies/8-l4-policies/test-l4-policies.sh all
+```
 
 ---
 
@@ -672,422 +796,4 @@ Includes detailed information about:
 - Comprehensive cleanup operations
 - Manual kubectl command equivalents for education
 
-### Enhanced Logging System
-
-The tool now includes a sophisticated logging system that captures all outputs and diagnostic information:
-
-- **Log Levels**: DEBUG, INFO, WARNING, ERROR with appropriate coloring in terminal
-- **Context-Aware**: Each log entry includes which test/component generated it
-- **Source Tracking**: File names and line numbers identify exact code locations
-- **Command Capture**: Full stdout/stderr from all executed commands
-- **Timestamp-Based Files**: Log files with matching timestamps to JSON reports
-
-**Log File Location**:
-```
-test_results/logs/k8s-diagnostic-logs-YYYYMMDD-HHMMSS.log
-```
-
-**Sample Log Content**:
-```
-[2025-07-10 14:48:37][INFO][logging.go:82] Logging system initialized. Log file: k8s-diagnostic-logs-20250710-144837.log
-[2025-07-10 14:48:37][INFO][test.go:77] Starting Kubernetes connectivity diagnostic tests
-[2025-07-10 14:48:37][INFO][test.go:78] Configuration: namespace=demo, verbose=true, test-all=false
-[2025-07-10 14:48:37][DEBUG][test.go:87] Creating diagnostic tester with kubeconfig: , namespace: demo
-[2025-07-10 14:48:37][INFO][Test 1: Pod-to-Pod Connectivity][test.go:349] Starting test with configuration: {Placement:both}
-[2025-07-10 14:48:37][DEBUG][Test 1: Pod-to-Pod Connectivity][test.go:355] Executing test function
-[2025-07-10 14:48:51][INFO][Test 1: Pod-to-Pod Connectivity][test.go:361] Test completed in 14.29 seconds
-[2025-07-10 14:48:51][INFO][Test 1: Pod-to-Pod Connectivity][test.go:365] Test PASSED: Both same-node and cross-node connectivity tests passed
-```
-
-### JSON Result Files
-
-**Every test execution automatically generates a comprehensive JSON report** saved to the `test_results/` directory. These files provide structured data perfect for monitoring dashboards, CI/CD integration, and historical analysis.
-
-#### File Naming and Location
-```
-test_results/k8s-diagnostic-results-YYYYMMDD-HHMMSS.json
-test_results/logs/k8s-diagnostic-logs-YYYYMMDD-HHMMSS.log
-```
-- **New file per execution** - no overwriting
-- **Timestamped filenames** prevent conflicts
-- **Organized storage** in dedicated directories
-- **Matching timestamps** between JSON reports and log files
-
-#### Smart Detail Strategy
-
-The JSON logging uses an intelligent approach to balance file size with debugging capability:
-
-**✓ Successful Tests (Clean Format):**
-```json
-{
-  "test_number": 1,
-  "test_name": "Pod-to-Pod Connectivity",
-  "status": "PASSED",
-  "success_message": "Pod netshoot-test-2 is reachable from pod netshoot-test-1",
-  "details": [],
-  "execution_time_seconds": 6.12
-}
-```
-
-**✗ Failed Tests (Full Debug Details):**
-```json
-{
-  "test_number": 1,
-  "test_name": "Pod-to-Pod Connectivity", 
-  "status": "FAILED",
-  "error_message": "Pod netshoot-test-2 is not reachable from pod netshoot-test-1",
-  "details": [
-    "✓ Found 2 worker nodes",
-    "✓ Created pod netshoot-test-1 on node diag-sandbox-worker",
-    "✓ Pod netshoot-test-2 IP: 10.0.1.160",
-    "✗ Ping failed - pod netshoot-test-2 is not reachable from pod netshoot-test-1",
-    "  Ping output: PING 10.0.1.160 (10.0.1.160) 56(84) bytes of data..."
-  ],
-  "execution_time_seconds": 6.17
-}
-```
-
-#### Complete JSON Structure
-
-Each JSON file contains:
-
-```json
-{
-  "execution_info": {
-    "timestamp": "2025-07-02T10:11:19-07:00",
-    "filename": "k8s-diagnostic-results-20250702-101146.json", 
-    "namespace": "diagnostic-test",
-    "kubeconfig_source": "default",
-    "verbose_mode": false
-  },
-  "tests": [
-    {
-      "test_number": 1,
-      "test_name": "Pod-to-Pod Connectivity",
-      "description": "Validates direct pod communication across different worker nodes...",
-      "status": "PASSED",
-      "success_message": "Pod netshoot-test-2 is reachable from pod netshoot-test-1",
-      "details": [],
-      "start_time": "2025-07-02T10:11:19-07:00",
-      "end_time": "2025-07-02T10:11:25-07:00", 
-      "execution_time_seconds": 6.12
-    }
-  ],
-  "summary": {
-    "total_tests": 4,
-    "passed": 4,
-    "failed": 0,
-    "log_file": "k8s-diagnostic-logs-20250702-101146.log",
-    "overall_status": "PASSED",
-    "total_execution_time_seconds": 27.16,
-    "errors_encountered": null,
-    "completion_time": "2025-07-02T10:11:46-07:00"
-  }
-}
-```
-
-#### Example Files
-
-Two example JSON files demonstrate the different output formats:
-
-**1. All Tests Successful** (`test_results/k8s-diagnostic-results-20250702-101146.json`)
-- **Size:** ~1.5KB (compact)
-- **All tests:** `"status": "PASSED"` with `"details": []`
-- **Perfect for:** Monitoring dashboards, CI/CD success validation, routine health checks
-
-**2. Mixed Results with Failure** (`test_results/k8s-diagnostic-results-20250702-101515.json`)
-- **Size:** ~5KB (includes debug details)
-- **Failed test:** Complete debugging information in `"details"` array
-- **Successful tests:** Still clean with `"details": []`
-- **Perfect for:** Error investigation, troubleshooting, post-incident analysis
-
-#### Use Cases
-
-**Monitoring and Dashboards:**
-```bash
-# Extract key metrics
-cat test_results/k8s-diagnostic-results-*.json | jq '.summary'
-
-# Check overall status
-cat test_results/k8s-diagnostic-results-*.json | jq '.summary.overall_status'
-
-# Get execution time
-cat test_results/k8s-diagnostic-results-*.json | jq '.summary.total_execution_time_seconds'
-```
-
-**CI/CD Integration:**
-```bash
-# Run tests and parse JSON results
-./k8s-diagnostic test
-LATEST_RESULT=$(ls -t test_results/*.json | head -1)
-STATUS=$(cat "$LATEST_RESULT" | jq -r '.summary.overall_status')
-
-if [[ "$STATUS" == "PASSED" ]]; then
-  echo "✓ All connectivity tests passed"
-  exit 0
-else
-  echo "✗ Connectivity tests failed"
-  cat "$LATEST_RESULT" | jq '.summary.errors_encountered'
-  exit 1
-fi
-```
-
-**Error Analysis:**
-```bash
-# Find failed tests with full details
-cat test_results/*.json | jq '.tests[] | select(.status == "FAILED") | {test_name, error_message, details}'
-
-# Get timing analysis
-cat test_results/*.json | jq '.tests[] | {test_name, execution_time_seconds}' 
-```
-
-#### Key Benefits
-
-- **Compact successful runs:** ~80% smaller JSON files when all tests pass
-- **Rich failure debugging:** Complete diagnostic information when needed
-- **Historical tracking:** Every execution preserved with timestamps
-- **Integration ready:** Structured format perfect for automation
-- **Zero information loss:** All debugging data available for failed tests
-
-## Use Cases
-
-### Testing Kind Cluster
-```bash
-# Create cluster
-./build_test_k8s.sh
-
-# Run tests
-./k8s-diagnostic test --verbose
-
-# Cleanup
-./delete_test_k8s.sh k8s-diagnostic-test
-```
-
-### Testing Production Cluster
-```bash
-# Point to your cluster
-export KUBECONFIG=/path/to/your/kubeconfig
-
-# Run tests in custom namespace
-./k8s-diagnostic test --namespace prod-diagnostic-test
-
-# Or specify kubeconfig directly
-./k8s-diagnostic test --kubeconfig /path/to/kubeconfig --namespace test-env
-```
-
-### CI/CD Integration
-```bash
-# Non-interactive testing
-./k8s-diagnostic test --namespace ci-test-$(date +%s)
-echo "Exit code: $?"
-```
-
-## Development
-
-### Building
-
-```bash
-# Install dependencies
-go mod tidy
-
-# Build binary
-go build -o k8s-diagnostic .
-
-# Run tests
-go test ./...
-
-# Build with make
-make build
-make test
-make clean
-```
-
-### Available Make Targets
-
-```bash
-make help        # Show available targets
-make build       # Build the binary
-make test        # Run Go tests
-make clean       # Clean build files
-make deps        # Download dependencies
-make install     # Build and install to $GOPATH/bin
-```
-
-### Adding New Tests
-
-The architecture supports multiple test types. To add a new test:
-
-#### 1. Add Test Method to Tester
-
-```go
-// internal/diagnostic/tester.go
-
-// TestDNSResolution tests DNS resolution within the cluster
-func (t *Tester) TestDNSResolution(ctx context.Context) TestResult {
-    var details []string
-    
-    // Your test implementation here
-    // ...
-    
-    return TestResult{
-        Success: true,
-        Message: "DNS resolution test passed",
-        Details: details,
-    }
-}
-```
-
-#### 2. Add Test to Command
-
-```go
-// cmd/test.go
-
-// Add after Test 1: Pod-to-Pod Connectivity
-fmt.Printf("Test 2: DNS Resolution\n")
-result2 := tester.TestDNSResolution(ctx)
-
-if result2.Success {
-    fmt.Printf("✓ Test 2 PASSED: %s\n", result2.Message)
-} else {
-    fmt.Printf("✗ Test 2 FAILED: %s\n", result2.Message)
-}
-
-// Update overall result logic
-allTestsPassed := result1.Success && result2.Success
-```
-
-#### 3. Test Structure Guidelines
-
-- **Namespace agnostic**: Don't create/delete namespaces in test methods
-- **Resource cleanup**: Clean up any resources created during the test
-- **Detailed logging**: Provide step-by-step details for verbose mode
-- **Error handling**: Return clear error messages
-- **Context awareness**: Respect context cancellation
-
-### Example Test Implementation
-
-```go
-func (t *Tester) TestServiceConnectivity(ctx context.Context) TestResult {
-    var details []string
-    
-    // Create a test service
-    service, err := t.createTestService(ctx)
-    if err != nil {
-        return TestResult{
-            Success: false,
-            Message: fmt.Sprintf("Failed to create test service: %v", err),
-            Details: details,
-        }
-    }
-    details = append(details, "✓ Created test service")
-    
-    // Test diagnostic connectivity to service
-    // ... test implementation
-    
-    // Cleanup
-    t.cleanupService(ctx, service.Name)
-    details = append(details, "✓ Cleaned up test service")
-    
-    return TestResult{
-        Success: true,
-        Message: "Service diagnostic test passed",
-        Details: details,
-    }
-}
-```
-
-## Project Structure
-
-```
-k8s_diagnostic/
-├── build_test_k8s.sh           # Create test cluster script
-├── delete_test_k8s.sh          # Delete test cluster script
-├── main.go                     # CLI entry point
-├── cmd/                        # CLI commands
-│   ├── root.go                 # Root command with global flags
-│   └── test.go                 # Test command implementation
-├── internal/                   # Internal packages
-│   ├── diagnostic/           # Diagnostic testing logic
-│   │   └── tester.go          # Test implementations
-│   └── config/                # Configuration handling
-│       └── config.go          # Config management
-├── go.mod                     # Go module definition
-├── go.sum                     # Go module checksums
-├── Makefile                   # Build automation
-└── README.md                  # This documentation
-```
-
-## Requirements
-
-### System Requirements
-- Go 1.21+
-- Docker (for kind clusters)
-- kubectl
-- Access to a Kubernetes cluster
-
-### Kubernetes Requirements
-- At least 2 worker nodes (for pod-to-pod tests)
-- Ability to create namespaces
-- Ability to create pods
-- Container runtime that supports `nicolaka/netshoot` image
-
-### Permissions Required
-The tool needs the following Kubernetes permissions:
-- Create/delete namespaces
-- Create/delete pods
-- List nodes
-- Execute commands in pods (for ping tests)
-
-## Troubleshooting
-
-### Common Issues
-
-**"Need at least 2 worker nodes"**
-- Ensure your cluster has multiple worker nodes
-- Check with `kubectl get nodes`
-
-**"Pod did not become ready"**
-- Check if the cluster can pull `nicolaka/netshoot` image
-- Verify cluster has sufficient resources
-- Check pod events: `kubectl describe pod -n diagnostic-test`
-
-**"Namespace is being terminated"**
-- The tool automatically waits for namespace termination
-- If stuck, manually delete: `kubectl delete ns diagnostic-test --force --grace-period=0`
-
-**Permission Denied**
-- Ensure your kubeconfig has sufficient permissions
-- Check RBAC policies if using service accounts
-
-### Debug Mode
-
-For debugging issues:
-```bash
-# Enable verbose output
-./k8s-diagnostic test --verbose
-
-# Check cluster status
-kubectl get nodes
-kubectl get pods --all-namespaces
-
-# Check events
-kubectl get events --sort-by='.lastTimestamp'
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass: `make test`
-5. Submit a pull request
-
-### Code Style
-- Follow standard Go conventions
-- Add comments for exported functions
-- Include error handling
-- Write tests for new functionality
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Enhance
