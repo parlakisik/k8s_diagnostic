@@ -1,0 +1,15 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "pod-node-name-policy"
+  namespace: node-policy-test
+spec:
+  description: "Allow traffic only from pods scheduled on cluster-2-worker node"
+  endpointSelector:
+    matchLabels:
+      app: database
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        k8s:io.kubernetes.pod.namespace: node-policy-test
+        k8s:io.kubernetes.pod.nodeName: cluster-2-worker

@@ -1,0 +1,12 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "l3-cidr-ingress"
+spec:
+  description: "Allow ingress traffic only from specific CIDR blocks"
+  endpointSelector:
+    matchLabels:
+      app: web
+  ingress:
+  - fromCIDR:
+    - "10.244.0.0/16"  # Allow full pod network
