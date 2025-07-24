@@ -1,0 +1,33 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "icmp-type-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow specific ICMP types using numeric values (IPv4)"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  # Allow specific ICMP types by number
+  - icmps:
+    - fields:
+      - type: 8  # Echo Request (ping)
+        family: IPv4
+      - type: 0  # Echo Reply
+        family: IPv4
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+  
+  # Block all other ICMP types (implicit)
+  
+  # Still allow regular TCP traffic for HTTP
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client

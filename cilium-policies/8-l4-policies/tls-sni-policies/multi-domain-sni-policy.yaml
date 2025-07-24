@@ -1,0 +1,43 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "multi-domain-sni-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow TLS connections to multiple specific domains (multi-domain SNI policy)"
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  # Allow egress to specific domains via TLS SNI
+  - toPorts:
+    - ports:
+      - port: "443"
+        protocol: TCP
+      serverNames:
+      # Allowed domains - exact matches
+      - "one.one.one.one"     # Cloudflare DNS
+      - "dns.google"          # Google DNS
+      - "api.example.com"     # Example API
+      - "kubernetes.io"       # Kubernetes documentation
+      
+      # Wildcards are supported for subdomains
+      - "*.github.com"        # GitHub and subdomains
+      - "*.amazonaws.com"     # AWS services
+
+  # Allow DNS resolution to function properly
+  - toPorts:
+    - ports:
+      - port: "53"
+        protocol: UDP
+      - port: "53"
+        protocol: TCP
+    toEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "kube-system"
+        "k8s:k8s-app": "kube-dns"
+
+  # Allow ICMP for basic connectivity testing
+  - icmps:
+    - fields:
+      - type: 8  # Echo Request (ping)
