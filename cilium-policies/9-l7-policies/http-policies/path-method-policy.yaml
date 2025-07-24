@@ -1,0 +1,36 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "http-path-method-filtering"
+spec:
+  description: "Complex HTTP policy filtering by multiple paths and methods"
+  endpointSelector:
+    matchLabels:
+      app: api-server
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        role: frontend
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      rules:
+        http:
+        # Allow GET requests to public API paths
+        - method: "GET"
+          path: "/api/public/.*"
+        # Allow GET, POST to authenticated user endpoints
+        - method: "GET"
+          path: "/api/users/\\d+"
+        - method: "POST" 
+          path: "/api/users/\\d+/update"
+          headers:
+          - 'Authorization: Bearer .*'
+          - 'Content-Type: application/json'
+        # Allow admin operations with stricter headers
+        - method: "PUT|DELETE"
+          path: "/api/admin/.*"
+          headers:
+          - 'X-Admin-Token: true'
+          - 'X-Admin-Role: admin'

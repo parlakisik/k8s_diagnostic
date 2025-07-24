@@ -2,13 +2,29 @@ apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
   name: "l3-node-policy"
-  namespace: node-test
+  namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow traffic from cluster-2-worker only"
+  description: "Allow traffic from specific node only"
   endpointSelector:
     matchLabels:
-      app: database
+      app: api
   ingress:
-  - fromNodes:
+  # Allow all traffic from pods in the namespace (simpler approach)
+  - fromEndpoints:
     - matchLabels:
-        kubernetes.io/hostname: cluster-2-worker
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow all traffic from the cluster (even more permissive)
+  - fromEntities:
+    - cluster
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

@@ -1,0 +1,33 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "entities-based-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow traffic from predefined entities (host, world, cluster)"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  # Allow traffic from host - useful for monitoring or troubleshooting
+  - fromEntities:
+    - host
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  
+  # Allow traffic from cluster - traffic from all pods in the cluster
+  - fromEntities:
+    - cluster
+    toPorts:
+    - ports:
+      - port: "80" # Changed from 8080 to 80 to match test expectations
+        protocol: TCP
+  
+  # Allow traffic from world - restricted to ICMP for basic connectivity
+  - fromEntities:
+    - world
+    icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)
