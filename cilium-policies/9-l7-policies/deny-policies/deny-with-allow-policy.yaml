@@ -1,0 +1,29 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: "deny-with-allow-policy"
+spec:
+  description: "Demonstrate how deny policies take precedence over allow policies"
+  endpointSelector: {} # Applies to all endpoints
+  ingressDeny:
+  # Deny traffic from external sources ("world")
+  - fromEntities:
+    - "world"
+
+  # Allow traffic from anywhere in the cluster
+  ingress:
+  - fromEntities:
+    - "all"
+  
+  # Allow specific HTTP paths with L7 filtering
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      rules:
+        http:
+        - method: "GET"
+          path: "/api/.*"
+    fromEntities:
+    - "world"  # This allow rule will be overridden by the deny rule above
+               # The HTTP rules won't apply to "world" traffic

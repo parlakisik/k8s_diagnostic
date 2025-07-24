@@ -1,0 +1,81 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "combined-l4-sni-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Combined policy with port restrictions and SNI filtering"
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  # Allow HTTPS to specific domains via standard port (443)
+  - toPorts:
+    - ports:
+      - port: "443"
+        protocol: TCP
+      serverNames:
+      - "api.example.com"
+      - "*.api.example.com"
+      - "one.one.one.one"
+      - "dns.google"
+    toEndpoints:
+    - matchLabels:
+        role: "external-apis"
+        
+  # Allow HTTPS to different domains via alternate port (8443)
+  - toPorts:
+    - ports:
+      - port: "8443"
+        protocol: TCP
+      serverNames:
+      - "internal.example.com"
+      - "*.internal.example.com"
+    toEndpoints:
+    - matchLabels:
+        role: "internal-services"
+        
+  # Allow standard HTTP traffic without SNI restrictions
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      # No serverNames means all HTTP allowed (no SNI filtering)
+    toEndpoints:
+    - matchLabels:
+        app: "web-server"
+        
+  # Allow access to specific API via non-standard port with SNI
+  - toPorts:
+    - ports:
+      - port: "9443"
+        protocol: TCP
+      serverNames:
+      - "secure-api.example.com"
+      # Additional L7 HTTP filtering on top of SNI
+      rules:
+        http:
+        - method: "GET"
+          path: "/api/v1/public.*"
+        - method: "GET"
+          path: "/health"
+    toEndpoints:
+    - matchLabels:
+        app: "secure-api"
+
+  # Allow DNS resolution to function properly
+  - toPorts:
+    - ports:
+      - port: "53"
+        protocol: UDP
+      - port: "53"
+        protocol: TCP
+    toEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "kube-system"
+        "k8s:k8s-app": "kube-dns"
+
+  # Allow ICMP for basic connectivity testing
+  - icmps:
+    - fields:
+      - type: 8  # Echo Request (ping)

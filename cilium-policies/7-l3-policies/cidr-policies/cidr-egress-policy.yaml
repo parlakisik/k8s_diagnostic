@@ -1,13 +1,33 @@
 apiVersion: "cilium.io/v2"
-kind: CiliumClusterwideNetworkPolicy
+kind: CiliumNetworkPolicy
 metadata:
-  name: "l3-cidr-egress"
+  name: "cidr-egress-policy"
+  namespace: "{{NS_NAME}}"
 spec:
-  description: "Control egress traffic to specific CIDR blocks"
+  description: "Allow egress traffic from client2 to API pod via NODE1_CIDR"
   endpointSelector:
     matchLabels:
       app: client
+      location: node2
   egress:
+  # Allow traffic to the target pod's CIDR
   - toCIDR:
-    - "10.244.0.0/16"  # Allow traffic to pod network
-    - "8.8.8.8/32"     # Allow traffic to specific external IP (e.g., Google DNS)
+    - "{{NODE1_CIDR}}"
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow traffic directly to the API pod
+  - toEndpoints:
+    - matchLabels:
+        app: api
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - toEndpoints:
+    - matchLabels: {}
+    icmps:
+    - fields:
+      - type: 8  # Echo Request (ping)
