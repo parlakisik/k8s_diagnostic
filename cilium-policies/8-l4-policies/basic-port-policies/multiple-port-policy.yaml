@@ -1,0 +1,36 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "multiple-port-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow traffic to multiple specific ports (L4 multi-port policy)"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  - toPorts:
+    - ports:
+      # Web traffic
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+      # Database traffic
+      - port: "5432"
+        protocol: TCP
+      # Cache traffic
+      - port: "6379"
+        protocol: TCP
+      # Monitoring
+      - port: "9090"
+        protocol: TCP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client
+  
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

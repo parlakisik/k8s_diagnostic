@@ -51,3 +51,4 @@ eks-a-policy-tests/
 
 # Demo script
 demo_clusters.sh
+basic-network-test.sh

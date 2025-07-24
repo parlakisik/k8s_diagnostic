@@ -2,13 +2,33 @@ apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
   name: "traditional-node-selector"
-  namespace: node-selector-test
+  namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow traffic only from cluster-2-worker node"
+  description: "Allow traffic from pods on nodes with specific selector"
   endpointSelector:
     matchLabels:
-      app: backend
+      app: api
   ingress:
-  - fromNodes:
+  # Allow traffic from pods in the namespace
+  - fromEndpoints:
     - matchLabels:
-        kubernetes.io/hostname: cluster-2-worker
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow traffic from specific node label selectors
+  - fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+      nodeSelector:
+        matchLabels:
+          kubernetes.io/hostname: "{{NODE1}}"
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

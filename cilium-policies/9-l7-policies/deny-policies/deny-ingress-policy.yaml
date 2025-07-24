@@ -1,0 +1,34 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "deny-ingress-policy"
+spec:
+  description: "Deny specific ingress traffic regardless of other allow policies"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingressDeny:
+  # Deny traffic from specific endpoints
+  - fromEndpoints:
+    - matchLabels:
+        role: untrusted
+  
+  # Deny specific traffic types (e.g., block port 8080)
+  - toPorts:
+    - ports:
+      - port: "8080"
+        protocol: TCP
+    fromEndpoints:
+    - {}  # Match all sources for this port
+
+  # Regular allow rules (demonstrating that deny takes precedence)
+  ingress:
+  - fromEndpoints:
+    - matchLabels:
+        role: untrusted
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "8080"
+        protocol: TCP

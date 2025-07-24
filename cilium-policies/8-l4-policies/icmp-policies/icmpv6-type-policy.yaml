@@ -1,0 +1,43 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "icmpv6-type-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow specific ICMPv6 types using CamelCase names"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  # Allow specific ICMPv6 types by CamelCase name
+  - icmps:
+    - fields:
+      - type: "EchoRequest"
+        family: IPv6
+      - type: "EchoReply"
+        family: IPv6
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+
+  # Allow Neighbor Discovery Protocol (NDP) for IPv6 functionality
+  - icmps:
+    - fields:
+      - type: "NeighborSolicitation"
+        family: IPv6
+      - type: "NeighborAdvertisement" 
+        family: IPv6
+      - type: "RouterSolicitation"
+        family: IPv6
+      - type: "RouterAdvertisement"
+        family: IPv6
+
+  # Still allow regular TCP traffic for HTTP
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client

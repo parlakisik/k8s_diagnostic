@@ -1,21 +1,24 @@
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
-  name: "node-cidr-policy"
+  name: "tcp-port-ingress-policy"
   namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow traffic to API pod from the same node CIDR only"
+  description: "Allow TCP traffic to specific ports (L4 ingress policy)"
   endpointSelector:
     matchLabels:
       app: api
   ingress:
-  # Allow traffic from the same node CIDR only
-  - fromCIDR:
-    - "{{NODE1_CIDR}}"  # Allow traffic from the same node CIDR
-    toPorts:
+  - toPorts:
     - ports:
       - port: "80"
         protocol: TCP
+      - port: "443"
+        protocol: TCP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+  
   # Allow ICMP for basic connectivity tests
   - icmps:
     - fields:

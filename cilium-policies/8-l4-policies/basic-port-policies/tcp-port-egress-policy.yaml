@@ -1,0 +1,26 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "tcp-port-egress-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Control outgoing TCP traffic to specific ports (L4 egress policy)"
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+    toEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: api
+  
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)
