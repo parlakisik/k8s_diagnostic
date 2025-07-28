@@ -1,15 +1,33 @@
 apiVersion: "cilium.io/v2"
-kind: CiliumClusterwideNetworkPolicy
+kind: CiliumNetworkPolicy
 metadata:
-  name: "l3-cidr-with-except"
+  name: "cidr-with-except-policy"
+  namespace: "{{NS_NAME}}"
 spec:
   description: "Allow traffic from a CIDR block except for specific IPs"
   endpointSelector:
     matchLabels:
-      app: web
+      app: api
   ingress:
+  # Allow traffic from pods in the same namespace
+  - fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow traffic from the primary node CIDR but exclude the secondary node CIDR
   - fromCIDRSet:
-    - cidr: "10.244.0.0/16"  # Allow pod network
+    - cidr: "{{NODE1_CIDR}}"  # Allow pod network
       except:
-      - "10.244.1.100/32"    # Except this specific IP
-      - "10.244.2.0/24"      # Except this subnet
+      - "{{NODE2_CIDR}}"      # Except the other node's CIDR
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

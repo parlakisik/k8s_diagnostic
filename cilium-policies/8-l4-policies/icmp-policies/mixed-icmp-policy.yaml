@@ -1,0 +1,55 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "mixed-icmp-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Combined policy for both ICMP and ICMPv6 types"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  # Allow ICMP (IPv4) and ICMPv6 in a single rule
+  - icmps:
+    - fields:
+      # IPv4 ICMP by number
+      - type: 8  # Echo Request (ping)
+        family: IPv4
+      - type: 0  # Echo Reply
+        family: IPv4
+        
+      # IPv6 ICMP by name
+      - type: "EchoRequest"
+        family: IPv6
+      - type: "EchoReply"
+        family: IPv6
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+  
+  # Allow ICMP Destination Unreachable for both IPv4 and IPv6
+  - icmps:
+    - fields:
+      - type: 3  # Destination Unreachable (IPv4)
+        family: IPv4
+      - type: "DestinationUnreachable"  # Destination Unreachable (IPv6)
+        family: IPv6
+        
+  # Allow ICMP Time Exceeded for both IPv4 and IPv6
+  - icmps:
+    - fields:
+      - type: 11  # Time Exceeded (IPv4)
+        family: IPv4
+      - type: "TimeExceeded"  # Time Exceeded (IPv6)
+        family: IPv6
+        
+  # Still allow regular TCP traffic for HTTP
+  - toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+      - port: "443"
+        protocol: TCP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"

@@ -1,0 +1,30 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "port-range-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow traffic to a range of ports (L4 port range policy)"
+  endpointSelector:
+    matchLabels:
+      app: api
+  ingress:
+  - toPorts:
+    - ports:
+      # Define a range of ports (e.g., for a database cluster)
+      - port: "6000"
+        endPort: 6100
+        protocol: TCP
+      # Define another range for UDP traffic
+      - port: "8000"
+        endPort: 8100
+        protocol: UDP
+    fromEndpoints:
+    - matchLabels:
+        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client
+  
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

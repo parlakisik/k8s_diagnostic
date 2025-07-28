@@ -1,12 +1,31 @@
 apiVersion: "cilium.io/v2"
-kind: CiliumClusterwideNetworkPolicy
+kind: CiliumNetworkPolicy
 metadata:
-  name: "l3-cidr-ingress"
+  name: "cidr-ingress-policy"
+  namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow ingress traffic only from specific CIDR blocks"
+  description: "Allow ingress traffic from the same node CIDR"
   endpointSelector:
     matchLabels:
-      app: web
+      app: api
   ingress:
-  - fromCIDR:
-    - "10.244.0.0/16"  # Allow full pod network
+  # Method 1: Allow traffic based on pod identity/labels
+  - fromEndpoints:
+    - matchLabels:
+        app: client
+        location: node1
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Method 2: Allow traffic based on CIDR
+  - fromCIDRSet:
+    - cidr: "{{NODE1_CIDR}}"
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)

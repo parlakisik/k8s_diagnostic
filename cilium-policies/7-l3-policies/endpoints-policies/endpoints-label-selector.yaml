@@ -1,25 +1,19 @@
 apiVersion: "cilium.io/v2"
-kind: CiliumClusterwideNetworkPolicy
+kind: CiliumNetworkPolicy
 metadata:
-  name: "node-based-policy-clusterwide"
+  name: "endpoints-label-selector"
+  namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow traffic only from pods on specific node"
+  description: "Allow traffic from endpoints with specific labels (endpoints-based policy)"
   endpointSelector:
     matchLabels:
       app: api
   ingress:
-  # Allow all traffic from nodes
-  - fromEntities:
-    - cluster
-    - remote-node
-    toPorts:
-    - ports:
-      - port: "80"
-        protocol: TCP
-  # Explicitly allow all traffic from the specific namespace pods
+  # Allow traffic from pods in the namespace with specific labels
   - fromEndpoints:
     - matchLabels:
         "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
+        app: client
     toPorts:
     - ports:
       - port: "80"

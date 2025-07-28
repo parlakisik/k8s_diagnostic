@@ -1,0 +1,46 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "dns-fqdn-visibility-policy"
+spec:
+  description: "DNS visibility policy with toFQDNs for IP discovery"
+  endpointSelector:
+    matchLabels:
+      app: client
+  egress:
+  # Allow DNS resolution with specific Kubernetes services included
+  - toEndpoints:
+    - matchLabels:
+       "k8s:io.kubernetes.pod.namespace": kube-system
+       "k8s:k8s-app": kube-dns
+    toPorts:
+      - ports:
+         - port: "53"
+           protocol: ANY
+        rules:
+          dns:
+            # Allow all DNS queries for visibility
+            - matchPattern: "*"
+            # Explicitly include Kubernetes services for better compatibility
+            - matchName: "kubernetes.default.svc.cluster.local"
+            - matchName: "kube-dns.kube-system.svc.cluster.local"
+            - matchPattern: "*.svc.cluster.local"
+  
+  # Allow connections only to IPs resolved from specified domains
+  - toFQDNs:
+      - matchName: "cilium.io"
+      - matchName: "sub.cilium.io"
+      - matchPattern: "*.sub.cilium.io"
+      # Include Kubernetes services in toFQDNs as well
+      - matchName: "kubernetes.default.svc.cluster.local"
+      - matchName: "kube-dns.kube-system.svc.cluster.local"
+    toPorts:
+      - ports:
+         - port: "80"
+           protocol: TCP
+         - port: "443"
+           protocol: TCP
+         - port: "53"
+           protocol: UDP
+         - port: "53"
+           protocol: TCP

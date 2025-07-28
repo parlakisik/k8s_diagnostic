@@ -1,0 +1,23 @@
+apiVersion: "cilium.io/v2"
+kind: CiliumNetworkPolicy
+metadata:
+  name: "service-based-policy"
+  namespace: "{{NS_NAME}}"
+spec:
+  description: "Allow client pods to access the API service"
+  endpointSelector:
+    matchLabels:
+      app: client  # Select client pods - this controls their outbound traffic
+  egress:  # Control outgoing traffic FROM clients
+  - toServices:  # TO the API service
+    - k8sService:
+        serviceName: api-svc  # The service we want to allow access to
+        namespace: "{{NS_NAME}}"
+    toPorts:  # On specific port(s)
+    - ports:
+      - port: "80"
+        protocol: TCP
+  # Allow ICMP for basic connectivity tests
+  - icmps:
+    - fields:
+      - type: 8 # Echo Request (ping)
