@@ -1584,12 +1584,29 @@ func (t *Tester) collectNodeInfoDirect(ctx context.Context) (map[string]string, 
 	return nodeInfo, nil
 }
 
-// processPolicyTemplate processes a policy template file and returns the result
+// processPolicyTemplate processes a policy template file using COMPLETE dynamic template variable discovery
 func (t *Tester) processPolicyTemplate(policyPath, namespace string, nodeInfo map[string]string) (*PolicyTemplateResult, error) {
 	// Read the policy template file
 	content, err := os.ReadFile(policyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read policy template file: %v", err)
+	}
+
+	// Create infrastructure collector for COMPLETE template variable discovery
+	// Use verbose=false to suppress redundant output during template processing
+	// Infrastructure info is already shown once at the beginning in cmd/test.go
+	infraCollector := NewInfrastructureCollector(t.clientset, false)
+
+	// Discover ALL template variables dynamically - this replaces the limited CIDR-only discovery
+	ctx := context.Background()
+	templateVars, err := infraCollector.DiscoverTemplateVariables(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover template variables for policy processing: %v", err)
+	}
+
+	// Validate that we got real network data, not empty values
+	if templateVars.PodCIDR == "" || templateVars.NodeCIDR == "" || templateVars.Node1CIDR == "" {
+		return nil, fmt.Errorf("template variable discovery returned empty network values - no hardcoded fallbacks allowed")
 	}
 
 	// Create a temporary file to store the processed policy
@@ -1609,54 +1626,158 @@ func (t *Tester) processPolicyTemplate(policyPath, namespace string, nodeInfo ma
 	processedContent := string(content)
 	originalContent := processedContent
 
-	// Replace variables with their actual values
+	// Replace basic variables
 	processedContent = strings.ReplaceAll(processedContent, "{{NS_NAME}}", namespace)
 	result.VariablesReplaced["NS_NAME"] = namespace
 
-	// Replace node-related variables
+	// Replace ALL network CIDR variables (discovered from real cluster)
+	processedContent = strings.ReplaceAll(processedContent, "{{POD_CIDR}}", templateVars.PodCIDR)
+	result.VariablesReplaced["POD_CIDR"] = templateVars.PodCIDR
+
+	processedContent = strings.ReplaceAll(processedContent, "{{NODE_CIDR}}", templateVars.NodeCIDR)
+	result.VariablesReplaced["NODE_CIDR"] = templateVars.NodeCIDR
+
+	processedContent = strings.ReplaceAll(processedContent, "{{NODE1_CIDR}}", templateVars.Node1CIDR)
+	result.VariablesReplaced["NODE1_CIDR"] = templateVars.Node1CIDR
+
+	// CRITICAL FIX: Add the missing EXCEPT_CIDR variable
+	processedContent = strings.ReplaceAll(processedContent, "{{EXCEPT_CIDR}}", templateVars.ExceptCIDR)
+	result.VariablesReplaced["EXCEPT_CIDR"] = templateVars.ExceptCIDR
+
+	// CRITICAL FIX: Add ALL missing domain wildcard variables
+	processedContent = strings.ReplaceAll(processedContent, "{{CILIUM_DOMAIN_WILDCARD}}", templateVars.CiliumDomainWildcard)
+	result.VariablesReplaced["CILIUM_DOMAIN_WILDCARD"] = templateVars.CiliumDomainWildcard
+
+	processedContent = strings.ReplaceAll(processedContent, "{{GITHUB_DOMAIN_WILDCARD}}", templateVars.GithubDomainWildcard)
+	result.VariablesReplaced["GITHUB_DOMAIN_WILDCARD"] = templateVars.GithubDomainWildcard
+
+	processedContent = strings.ReplaceAll(processedContent, "{{DOCKER_DOMAIN_WILDCARD}}", templateVars.DockerDomainWildcard)
+	result.VariablesReplaced["DOCKER_DOMAIN_WILDCARD"] = templateVars.DockerDomainWildcard
+
+	processedContent = strings.ReplaceAll(processedContent, "{{GOOGLEAPIS_DOMAIN_WILDCARD}}", templateVars.GoogleapisDomainWildcard)
+	result.VariablesReplaced["GOOGLEAPIS_DOMAIN_WILDCARD"] = templateVars.GoogleapisDomainWildcard
+
+	processedContent = strings.ReplaceAll(processedContent, "{{AWS_DOMAIN_WILDCARD}}", templateVars.AWSDomainWildcard)
+	result.VariablesReplaced["AWS_DOMAIN_WILDCARD"] = templateVars.AWSDomainWildcard
+
+	processedContent = strings.ReplaceAll(processedContent, "{{TEST_DOMAIN_PATTERN}}", templateVars.TestDomainPattern)
+	result.VariablesReplaced["TEST_DOMAIN_PATTERN"] = templateVars.TestDomainPattern
+
+	// CRITICAL FIX: Add the missing base domain variables from DNS policies
+	processedContent = strings.ReplaceAll(processedContent, "{{CILIUM_BASE_DOMAIN}}", templateVars.CiliumBaseDomain)
+	result.VariablesReplaced["CILIUM_BASE_DOMAIN"] = templateVars.CiliumBaseDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{CILIUM_API_DOMAIN}}", templateVars.CiliumAPIDomain)
+	result.VariablesReplaced["CILIUM_API_DOMAIN"] = templateVars.CiliumAPIDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{CILIUM_DOCS_DOMAIN}}", templateVars.CiliumDocsDomain)
+	result.VariablesReplaced["CILIUM_DOCS_DOMAIN"] = templateVars.CiliumDocsDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{GITHUB_BASE_DOMAIN}}", templateVars.GithubBaseDomain)
+	result.VariablesReplaced["GITHUB_BASE_DOMAIN"] = templateVars.GithubBaseDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{DOCKER_REGISTRY_DOMAIN}}", templateVars.DockerRegistryDomain)
+	result.VariablesReplaced["DOCKER_REGISTRY_DOMAIN"] = templateVars.DockerRegistryDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{CLUSTER_DOMAIN}}", templateVars.ClusterDomain)
+	result.VariablesReplaced["CLUSTER_DOMAIN"] = templateVars.ClusterDomain
+
+	// Add other discovered template variables
+	processedContent = strings.ReplaceAll(processedContent, "{{API_DOMAIN}}", templateVars.APIDomain)
+	result.VariablesReplaced["API_DOMAIN"] = templateVars.APIDomain
+
+	processedContent = strings.ReplaceAll(processedContent, "{{DNS_SERVER1}}", templateVars.DNSServer1)
+	result.VariablesReplaced["DNS_SERVER1"] = templateVars.DNSServer1
+
+	processedContent = strings.ReplaceAll(processedContent, "{{DNS_SERVER2}}", templateVars.DNSServer2)
+	result.VariablesReplaced["DNS_SERVER2"] = templateVars.DNSServer2
+
+	// Replace node-related variables (still use nodeInfo for node names)
 	if nodeName, ok := nodeInfo["NODE1"]; ok {
 		processedContent = strings.ReplaceAll(processedContent, "{{NODE1}}", nodeName)
 		result.VariablesReplaced["NODE1"] = nodeName
-	} else {
-		defaultValue := "worker-node-1"
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE1}}", defaultValue)
-		result.VariablesReplaced["NODE1"] = defaultValue
-		result.UsedFallbackValues = true
-		result.WarningsGenerated = append(result.WarningsGenerated, "NODE1 variable found but no node information available, using fallback")
+	} else if strings.Contains(processedContent, "{{NODE1}}") {
+		// Only fail if the template actually uses this variable
+		return nil, fmt.Errorf("NODE1 variable found in template but no node information available - no hardcoded fallbacks allowed")
 	}
 
 	if nodeName, ok := nodeInfo["NODE2"]; ok {
 		processedContent = strings.ReplaceAll(processedContent, "{{NODE2}}", nodeName)
 		result.VariablesReplaced["NODE2"] = nodeName
-	} else {
-		defaultValue := "worker-node-2"
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE2}}", defaultValue)
-		result.VariablesReplaced["NODE2"] = defaultValue
-		result.UsedFallbackValues = true
-		result.WarningsGenerated = append(result.WarningsGenerated, "NODE2 variable found but no node information available, using fallback")
+	} else if strings.Contains(processedContent, "{{NODE2}}") {
+		// Only fail if the template actually uses this variable
+		return nil, fmt.Errorf("NODE2 variable found in template but no node information available - no hardcoded fallbacks allowed")
 	}
 
-	// Handle CIDR variables
-	if nodeCIDR, ok := nodeInfo["NODE1_CIDR"]; ok && nodeCIDR != "" {
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE1_CIDR}}", nodeCIDR)
-		result.VariablesReplaced["NODE1_CIDR"] = nodeCIDR
-	} else {
-		fallbackCIDR := "10.0.0.0/16"
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE1_CIDR}}", fallbackCIDR)
-		result.VariablesReplaced["NODE1_CIDR"] = fallbackCIDR
-		result.UsedFallbackValues = true
-		result.WarningsGenerated = append(result.WarningsGenerated, "Using fallback NODE1_CIDR: "+fallbackCIDR)
+	// ENHANCED: Check for any remaining unprocessed variables
+	remainingVars := []string{}
+	if strings.Contains(processedContent, "{{") && strings.Contains(processedContent, "}}") {
+		// Extract remaining template variables for reporting
+		lines := strings.Split(processedContent, "\n")
+		for _, line := range lines {
+			if strings.Contains(line, "{{") && strings.Contains(line, "}}") {
+				start := strings.Index(line, "{{")
+				end := strings.Index(line[start:], "}}")
+				if end != -1 {
+					varName := line[start+2 : start+end]
+					remainingVars = append(remainingVars, "{{"+varName+"}}")
+				}
+			}
+		}
 	}
 
-	if nodeCIDR, ok := nodeInfo["NODE2_CIDR"]; ok && nodeCIDR != "" {
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE2_CIDR}}", nodeCIDR)
-		result.VariablesReplaced["NODE2_CIDR"] = nodeCIDR
-	} else {
-		fallbackCIDR := "10.1.0.0/16"
-		processedContent = strings.ReplaceAll(processedContent, "{{NODE2_CIDR}}", fallbackCIDR)
-		result.VariablesReplaced["NODE2_CIDR"] = fallbackCIDR
-		result.UsedFallbackValues = true
-		result.WarningsGenerated = append(result.WarningsGenerated, "Using fallback NODE2_CIDR: "+fallbackCIDR)
+	if len(remainingVars) > 0 {
+		return nil, fmt.Errorf("unprocessed template variables found: %v", remainingVars)
+	}
+
+	// Log template variable discovery to frontend logger for JSON results
+	if logger := GetGlobalMultiChannelLogger(); logger != nil {
+		if frontendLogger := logger.GetFrontendLogger(); frontendLogger != nil {
+			// Extract policy name from path for test identification
+			policyBaseName := strings.TrimSuffix(strings.TrimPrefix(policyPath, "cilium-policies/"), ".yaml")
+			hierarchy := &HierarchyContext{
+				TestId: policyBaseName,
+				Phase:  "template-processing",
+			}
+
+			// Log template variable discovery with discovery status
+			if err := frontendLogger.LogTemplateVariableDiscovery(templateVars, policyBaseName, hierarchy); err != nil && t.verbose {
+				fmt.Printf("Warning: Failed to log template variable discovery: %v\n", err)
+			}
+		}
+	}
+
+	if t.verbose {
+		fmt.Printf("  🔄 Dynamic template processing completed:\n")
+		// Show ALL variables with REAL discovery status from metadata
+		for varName, value := range result.VariablesReplaced {
+			// Get the actual discovery status from template variables
+			var status string
+			if templateVars.DiscoveryStatus != nil {
+				if actualStatus, exists := templateVars.DiscoveryStatus[varName]; exists {
+					// Use real discovery status
+					if strings.Contains(actualStatus, "fallback") {
+						status = "⚠️ " + actualStatus
+					} else {
+						status = "✓ " + actualStatus
+					}
+				} else {
+					// Handle variables not tracked in discovery status
+					switch varName {
+					case "NS_NAME":
+						status = "✓ provided by test framework"
+					case "NODE1", "NODE2":
+						status = "✓ discovered from cluster nodes"
+					default:
+						status = "✓ processed"
+					}
+				}
+			} else {
+				// Fallback if discovery status is not available
+				status = "processed"
+			}
+			fmt.Printf("    %s: %s (%s)\n", varName, value, status)
+		}
 	}
 
 	// Write the processed content to the temporary file
