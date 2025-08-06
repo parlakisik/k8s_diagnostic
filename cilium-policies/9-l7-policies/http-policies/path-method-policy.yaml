@@ -1,12 +1,12 @@
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
-  name: "http-path-method-filtering"
+  name: "path-method-policy"
 spec:
-  description: "Complex HTTP policy filtering by multiple paths and methods"
+  description: "L7 HTTP policy demonstrating complex path, method, and host combinations"
   endpointSelector:
     matchLabels:
-      app: api-server
+      app: api
   ingress:
   - fromEndpoints:
     - matchLabels:
@@ -17,20 +17,54 @@ spec:
         protocol: TCP
       rules:
         http:
-        # Allow GET requests to public API paths
+        # Public API - GET only, no authentication required
         - method: "GET"
           path: "/api/public/.*"
-        # Allow GET, POST to authenticated user endpoints
+        
+        # Health check endpoints - GET only
         - method: "GET"
-          path: "/api/users/\\d+"
-        - method: "POST" 
-          path: "/api/users/\\d+/update"
+          path: "/health$"
+        - method: "GET"
+          path: "/metrics$"
+        
+        # User operations - different methods with authentication
+        - method: "GET"
+          path: "/api/users/[0-9]+$"
+          headers:
+          - 'Authorization: Bearer .*'
+        
+        - method: "POST"
+          path: "/api/users$"
           headers:
           - 'Authorization: Bearer .*'
           - 'Content-Type: application/json'
-        # Allow admin operations with stricter headers
-        - method: "PUT|DELETE"
-          path: "/api/admin/.*"
+        
+        - method: "PUT"
+          path: "/api/users/[0-9]+$"
           headers:
-          - 'X-Admin-Token: true'
+          - 'Authorization: Bearer .*'
+          - 'Content-Type: application/json'
+        
+        # Multi-tenant API with host-based routing
+        - method: "GET"
+          path: "/api/tenant/.*"
+          host: "tenant-[a-z0-9]+\\.api\\.example\\.com"
+          headers:
+          - 'Authorization: Bearer .*'
+        
+        # Admin operations - highest security requirements + specific host
+        - method: "DELETE"
+          path: "/api/admin/.*"
+          host: "admin\\.api\\.example\\.com"
+          headers:
+          - 'Authorization: Bearer .*'
           - 'X-Admin-Role: admin'
+          - 'X-CSRF-Token: .*'
+        
+        # Version-specific API endpoints by host
+        - method: "POST"
+          path: "/api/v1/.*"
+          host: "v1\\.api\\.example\\.com"
+          headers:
+          - 'Authorization: Bearer .*'
+          - 'Content-Type: application/json'

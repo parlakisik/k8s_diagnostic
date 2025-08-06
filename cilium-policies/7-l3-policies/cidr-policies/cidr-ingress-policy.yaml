@@ -9,18 +9,17 @@ spec:
     matchLabels:
       app: api
   ingress:
-  # Method 1: Allow traffic based on pod identity/labels
+  # Allow traffic based on pod identity/labels
   - fromEndpoints:
     - matchLabels:
         app: client
-        location: node1
     toPorts:
     - ports:
       - port: "80"
         protocol: TCP
-  # Method 2: Allow traffic based on CIDR
+  # Allow traffic from specific CIDR
   - fromCIDRSet:
-    - cidr: "{{NODE1_CIDR}}"
+    - cidr: "10.0.0.0/16"
     toPorts:
     - ports:
       - port: "80"

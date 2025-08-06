@@ -43,6 +43,9 @@ build/
 *.tmp
 *.log
 
+# Backup files
+*.bak
+
 # Cilium policy files (now tracked)
 # cilium-policies/ - removed from gitignore
 

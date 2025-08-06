@@ -4,7 +4,7 @@ metadata:
   name: "traditional-node-selector"
   namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow traffic from pods on nodes with specific selector"
+  description: "Allow traffic from pods on nodes with specific selector (compatible syntax)"
   endpointSelector:
     matchLabels:
       app: api
@@ -17,13 +17,9 @@ spec:
     - ports:
       - port: "80"
         protocol: TCP
-  # Allow traffic from specific node label selectors
-  - fromEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "{{NS_NAME}}"
-      nodeSelector:
-        matchLabels:
-          kubernetes.io/hostname: "{{NODE1}}"
+  # Use fromEntities instead of nodeSelector (compatible approach)
+  - fromEntities:
+    - "host"
     toPorts:
     - ports:
       - port: "80"

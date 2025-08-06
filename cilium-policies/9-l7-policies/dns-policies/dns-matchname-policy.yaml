@@ -3,11 +3,12 @@ kind: CiliumNetworkPolicy
 metadata:
   name: "dns-matchname-policy"
 spec:
-  description: "Allow specific DNS queries using exact name matching"
+  description: "L7 DNS policy allowing specific domain names using exact matching"
   endpointSelector:
     matchLabels:
       app: client
   egress:
+  # Allow DNS queries to DNS server
   - toEndpoints:
     - matchLabels:
         "k8s:io.kubernetes.pod.namespace": kube-system
@@ -18,9 +19,35 @@ spec:
            protocol: ANY
         rules:
           dns:
+            # External domains - exact match required
             - matchName: "cilium.io"
             - matchName: "api.cilium.io"
-            - matchName: "service1.api.cilium.io"
-            # Add Kubernetes internal service entries
+            - matchName: "docs.cilium.io"
+            - matchName: "github.com"
+            - matchName: "registry-1.docker.io"
+            
+            # Kubernetes internal services - exact match
             - matchName: "kubernetes.default.svc.cluster.local"
             - matchName: "kube-dns.kube-system.svc.cluster.local"
+            - matchName: "metrics-server.kube-system.svc.cluster.local"
+            
+            # Application-specific services
+            - matchName: "postgres.database.svc.cluster.local"
+            - matchName: "redis.cache.svc.cluster.local"
+
+  # Allow actual traffic to target pods/services after DNS resolution
+  - toEndpoints:
+    - matchLabels:
+        app: api
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+
+  # Allow ICMP (ping) to target pods
+  - toEndpoints:
+    - matchLabels:
+        app: api
+    icmps:
+    - fields:
+      - type: 8  # ICMP Echo Request (ping)
