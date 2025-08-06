@@ -1,0 +1,1073 @@
+package l4
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"k8s-diagnostic/internal/diagnostic/core"
+)
+
+// Type aliases for compatibility
+type TestResult = core.TestResult
+
+// Function aliases
+var ElapsedSeconds = core.ElapsedSeconds
+
+// L4PolicySubgroups defines test subgroups for organization and concurrent execution
+// Exported so it can be accessed from cmd/test.go for validation
+var L4PolicySubgroups = map[string][]string{
+	"port":    {"tcp-port-ingress", "tcp-port-egress", "port-range", "multiple-port"},
+	"icmp":    {"icmp-type", "icmpv6-type", "mixed-icmp"},
+	"tls-sni": {"basic-sni", "multi-domain-sni", "combined-l4-sni"},
+}
+
+// Map of test names to test keys (for CLI reference)
+var L4PolicyTestNameToKey = map[string]string{
+	"tcp-port-ingress-policy": "tcp-port-ingress",
+	"tcp-port-egress-policy":  "tcp-port-egress",
+	"port-range-policy":       "port-range",
+	"multiple-port-policy":    "multiple-port",
+	"icmp-type-policy":        "icmp-type",
+	"icmpv6-type-policy":      "icmpv6-type",
+	"mixed-icmp-policy":       "mixed-icmp",
+	"basic-sni-policy":        "basic-sni",
+	"multi-domain-sni-policy": "multi-domain-sni",
+	"combined-l4-sni-policy":  "combined-l4-sni",
+}
+
+// TestTCPPortIngressPolicy tests the TCP port ingress policy
+func TestTCPPortIngressPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "tcp-port-ingress-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/basic-port-policies/tcp-port-ingress-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("TCP Port Ingress Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying TCP port ingress policy", "Policy file: tcp-port-ingress-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows traffic on specific ports
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	// Calculate test duration for verbose reporting
+	duration := time.Since(startTime)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port ingress policy", true, "TCP port ingress policy deployed and tested successfully")
+	} else {
+		// Enhanced verbose mode: Show detailed failure information using ACTUAL command history
+		if verbose {
+			// Get the REAL command executor used during TestNetworkPolicy
+			executor := t.GetLastExecutor()
+			if executor != nil {
+				failurePoint := "HTTP connectivity test"
+				errorDetails := core.ExtractErrorDetailsFromCommand(executor.GetCommandHistory(), "L4 port policy validation")
+
+				enhancedResult := core.CreateEnhancedTestResult(result, executor, failurePoint, errorDetails)
+				verboseOutput := core.FormatVerboseTestResultForHierarchy("tcp-port-ingress", enhancedResult, duration.Seconds(), verbose)
+
+				logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port ingress policy", false, verboseOutput)
+			} else {
+				logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port ingress policy", false, result.Message)
+			}
+		} else {
+			logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port ingress policy", false, result.Message)
+		}
+	}
+
+	// Complete test with logging and forced flush
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "port",
+		TestId:     "tcp-port-ingress",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("tcp-port-ingress", "port", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestTCPPortEgressPolicy tests the TCP port egress policy
+func TestTCPPortEgressPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "tcp-port-egress-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/basic-port-policies/tcp-port-egress-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Create a completely fresh context instead of inheriting from potentially exhausted parent
+	freshCtx := context.Background()
+	testCtx, cancel := context.WithTimeout(freshCtx, 3*time.Minute)
+	defer cancel()
+
+	// Ensure policy cleanup after test completion - use fresh context for cleanup too
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if err := t.CleanupNetworkPolicy(cleanupCtx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("TCP Port Egress Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying TCP port egress policy", "Policy file: tcp-port-egress-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		testCtx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows TCP 80/443 egress + ICMP
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port egress policy", true, "TCP port egress policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying TCP port egress policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "port",
+		TestId:     "tcp-port-egress",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("tcp-port-egress", "port", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestPortRangePolicy tests the port range policy
+func TestPortRangePolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "port-range-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/basic-port-policies/port-range-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Create a completely fresh context instead of inheriting from potentially exhausted parent
+	freshCtx := context.Background()
+	testCtx, cancel := context.WithTimeout(freshCtx, 3*time.Minute)
+	defer cancel()
+
+	// Ensure policy cleanup after test completion - use fresh context for cleanup too
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if err := t.CleanupNetworkPolicy(cleanupCtx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Port Range Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying port range policy", "Policy file: port-range-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		testCtx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows ICMP ping (test checks ping OR HTTP)
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying port range policy", true, "Port range policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying port range policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "port",
+		TestId:     "port-range",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("port-range", "port", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestMultiplePortPolicy tests the multiple port policy
+func TestMultiplePortPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "multiple-port-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/basic-port-policies/multiple-port-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Create a completely fresh context instead of inheriting from potentially exhausted parent
+	freshCtx := context.Background()
+	testCtx, cancel := context.WithTimeout(freshCtx, 3*time.Minute)
+	defer cancel()
+
+	// Ensure policy cleanup after test completion - use fresh context for cleanup too
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if err := t.CleanupNetworkPolicy(cleanupCtx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Multiple Port Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying multiple port policy", "Policy file: multiple-port-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		testCtx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows TCP 80 + ICMP
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying multiple port policy", true, "Multiple port policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying multiple port policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "port",
+		TestId:     "multiple-port",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("multiple-port", "port", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestICMPTypePolicy tests the ICMP type policy
+func TestICMPTypePolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "icmp-type-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/icmp-policies/icmp-type-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("ICMP Type Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying ICMP type policy", "Policy file: icmp-type-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows ICMP ping
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying ICMP type policy", true, "ICMP type policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying ICMP type policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "icmp",
+		TestId:     "icmp-type",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("icmp-type", "icmp", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestICMPv6TypePolicy tests the ICMPv6 type policy
+func TestICMPv6TypePolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "icmpv6-type-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/icmp-policies/icmpv6-type-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("ICMPv6 Type Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying ICMPv6 type policy", "Policy file: icmpv6-type-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows ICMPv6 ping
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying ICMPv6 type policy", true, "ICMPv6 type policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying ICMPv6 type policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "icmp",
+		TestId:     "icmpv6-type",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("icmpv6-type", "icmp", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestMixedICMPPolicy tests the mixed ICMP policy
+func TestMixedICMPPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "mixed-icmp-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/icmp-policies/mixed-icmp-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Mixed ICMP Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying mixed ICMP policy", "Policy file: mixed-icmp-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows both ICMP and ICMPv6 ping
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying mixed ICMP policy", true, "Mixed ICMP policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying mixed ICMP policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "icmp",
+		TestId:     "mixed-icmp",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("mixed-icmp", "icmp", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestBasicSNIPolicy tests the basic SNI policy
+func TestBasicSNIPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "basic-sni-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/tls-sni-policies/basic-sni-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Basic SNI Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying basic SNI policy", "Policy file: basic-sni-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows TLS traffic to specific domain
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying basic SNI policy", true, "Basic SNI policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying basic SNI policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "tls-sni",
+		TestId:     "basic-sni",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("basic-sni", "tls-sni", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestMultiDomainSNIPolicy tests the multi-domain SNI policy
+func TestMultiDomainSNIPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "multi-domain-sni-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/tls-sni-policies/multi-domain-sni-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Multi-Domain SNI Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying multi-domain SNI policy", "Policy file: multi-domain-sni-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows TLS traffic to multiple domains
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying multi-domain SNI policy", true, "Multi-domain SNI policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying multi-domain SNI policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "tls-sni",
+		TestId:     "multi-domain-sni",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("multi-domain-sni", "tls-sni", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// TestCombinedL4SNIPolicy tests the combined L4 and SNI policy
+func TestCombinedL4SNIPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	startTime := time.Now()
+	var details []string
+
+	policyName := "combined-l4-sni-policy" // Keep as fallback
+	policyPath := "cilium-policies/8-l4-policies/tls-sni-policies/combined-l4-sni-policy.yaml"
+
+	// Extract real policy name from YAML metadata (same as L3 tests)
+	if realPolicyName, err := t.ExtractPolicyNameFromFile(policyPath); err == nil {
+		policyName = realPolicyName
+	}
+
+	// Ensure policy cleanup after test completion
+	defer func() {
+		if err := t.CleanupNetworkPolicy(ctx, policyName, policyPath); err != nil {
+			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+		}
+	}()
+
+	// Start test with structured logging (suppress verbose headers in hierarchical mode)
+	if verbose {
+		logger.LogTestStart("Combined L4 SNI Policy Test", testNumber, totalTests, "l4-policies")
+	}
+
+	// Policy deployment - visible in both verbose and non-verbose modes (no step numbers)
+	logger.LogStepName("Deploying combined L4 SNI policy", "Policy file: combined-l4-sni-policy.yaml")
+
+	result := t.TestNetworkPolicy(
+		ctx,
+		policyName,
+		policyPath,
+		true, // Expect connectivity to succeed - policy allows TLS traffic with port and domain restrictions
+		&details,
+		verbose,
+		reuseResources,
+	)
+
+	if result.Success {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying combined L4 SNI policy", true, "Combined L4 SNI policy deployed and tested successfully")
+	} else {
+		logger.GetFrontendLogger().LogStepCompleteWithForcedFlush("Deploying combined L4 SNI policy", false, result.Message)
+	}
+
+	// Complete test with logging and forced flush
+	duration := time.Since(startTime)
+	hierarchy := &core.HierarchyContext{
+		GroupId:    "l4-policies",
+		SubgroupId: "tls-sni",
+		TestId:     "combined-l4-sni",
+		Phase:      "execution",
+	}
+	logger.GetFrontendLogger().LogL4TestComplete("combined-l4-sni", "tls-sni", testNumber, totalTests, result.Success, duration.Seconds(), hierarchy)
+
+	return result
+}
+
+// L4TestGroup represents a group of L4 tests with metadata for the executor
+type L4TestGroup struct {
+	Name      string
+	TestFuncs []func(*core.MultiChannelLogger, *core.Tester, context.Context, bool, bool, int, int) TestResult
+	TestNames []string
+}
+
+// TestL4PoliciesSequential runs L4 policy tests with sequential execution for clean policy isolation
+func TestL4PoliciesSequential(t *core.Tester, ctx context.Context, requestedSubgroups []string, verbose ...bool) []TestResult {
+	// Determine verbose mode
+	isVerbose := false
+	if len(verbose) > 0 {
+		isVerbose = verbose[0]
+	}
+	allResults := []TestResult{}
+
+	if isVerbose {
+		fmt.Printf("\n===== L4 POLICIES SEQUENTIAL EXECUTION - VERBOSE MODE ENABLED =====\n")
+		fmt.Printf("Verbose output will be shown for each test\n")
+		fmt.Printf("============================================================\n\n")
+	}
+
+	fmt.Printf("Starting L4 policies tests...\n")
+
+	// Create test groups based on requested subgroups
+	testGroups := buildL4TestGroups(requestedSubgroups)
+
+	// Execute test groups sequentially with timing collection
+	timedResults, _ := executeL4TestGroupsWithTiming(t, ctx, testGroups, isVerbose)
+
+	// Extract basic results for backward compatibility
+	for _, timedResult := range timedResults {
+		allResults = append(allResults, timedResult.TestResult)
+	}
+
+	// Calculate passed/failed counts
+	passedTests := 0
+	failedTests := 0
+	for _, result := range allResults {
+		if result.Success {
+			passedTests++
+		} else {
+			failedTests++
+		}
+	}
+
+	// Create display names mapping for L4 tests
+	displayNames := map[string]string{
+		"tcp-port-ingress": "TCP Port Ingress Policy",
+		"tcp-port-egress":  "TCP Port Egress Policy",
+		"port-range":       "Port Range Policy",
+		"multiple-port":    "Multiple Port Policy",
+		"icmp-type":        "ICMP Type Policy",
+		"icmpv6-type":      "ICMPv6 Type Policy",
+		"mixed-icmp":       "Mixed ICMP Policy",
+		"basic-sni":        "Basic SNI Policy",
+		"multi-domain-sni": "Multi-Domain SNI Policy",
+		"combined-l4-sni":  "Combined L4 SNI Policy",
+	}
+
+	// Create test names list from the timed results
+	var testNames []string
+	for _, group := range testGroups {
+		for _, testName := range group.TestNames {
+			testNames = append(testNames, testName)
+		}
+	}
+
+	// Display enhanced verbose summary with Expected vs Received details
+	core.FormatEnhancedTestSummary(timedResults, testNames, displayNames, isVerbose)
+
+	return allResults
+}
+
+// buildL4TestGroups creates test groups based on requested subgroups
+func buildL4TestGroups(requestedSubgroups []string) []L4TestGroup {
+	groups := []L4TestGroup{}
+
+	// If no specific subgroups are requested, use all available subgroups
+	if len(requestedSubgroups) == 0 {
+		for subgroup := range L4PolicySubgroups {
+			requestedSubgroups = append(requestedSubgroups, subgroup)
+		}
+	}
+
+	// Map each test key to its function with updated signature
+	testFunctions := map[string]func(*core.MultiChannelLogger, *core.Tester, context.Context, bool, bool, int, int) TestResult{
+		"tcp-port-ingress": TestTCPPortIngressPolicy,
+		"tcp-port-egress":  TestTCPPortEgressPolicy,
+		"port-range":       TestPortRangePolicy,
+		"multiple-port":    TestMultiplePortPolicy,
+		"icmp-type":        TestICMPTypePolicy,
+		"icmpv6-type":      TestICMPv6TypePolicy,
+		"mixed-icmp":       TestMixedICMPPolicy,
+		"basic-sni":        TestBasicSNIPolicy,
+		"multi-domain-sni": TestMultiDomainSNIPolicy,
+		"combined-l4-sni":  TestCombinedL4SNIPolicy,
+	}
+
+	// Build groups based on requested subgroups
+	for _, subgroupName := range requestedSubgroups {
+		testNames, exists := L4PolicySubgroups[subgroupName]
+		if !exists {
+			fmt.Printf("Warning: Subgroup '%s' not found in L4 policies, skipping\n", subgroupName)
+			continue
+		}
+
+		group := L4TestGroup{
+			Name:      subgroupName,
+			TestFuncs: []func(*core.MultiChannelLogger, *core.Tester, context.Context, bool, bool, int, int) TestResult{},
+			TestNames: []string{},
+		}
+
+		// Add tests to the group
+		for _, testName := range testNames {
+			testFunc, exists := testFunctions[testName]
+			if exists {
+				group.TestFuncs = append(group.TestFuncs, testFunc)
+				group.TestNames = append(group.TestNames, testName)
+			} else {
+				fmt.Printf("Warning: Test function for '%s' not found, skipping\n", testName)
+			}
+		}
+
+		if len(group.TestFuncs) > 0 {
+			groups = append(groups, group)
+		}
+	}
+
+	return groups
+}
+
+// executeL4TestGroups runs the test groups with optimized cleanup for faster execution
+func executeL4TestGroups(t *core.Tester, ctx context.Context, groups []L4TestGroup, verbose bool) []core.TestResult {
+	var allResults []core.TestResult
+
+	// Create cleanup orchestrator
+	logger := core.GetGlobalMultiChannelLogger()
+	orchestrator := core.NewCleanupOrchestrator(t, logger)
+
+	// Calculate total number of tests for sequential numbering
+	totalTests := 0
+	for _, group := range groups {
+		totalTests += len(group.TestFuncs)
+	}
+
+	currentTestNumber := 1
+
+	// Execute subgroups sequentially with optimized cleanup for speed
+	for i, group := range groups {
+		// Track execution time for this group
+		groupStart := time.Now()
+
+		// Print subgroup header
+		fmt.Printf("Running %s tests (group %d/%d)...\n", group.Name, i+1, len(groups))
+
+		// Create group-specific context with timeout
+		groupCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+
+		// Execute tests within this group
+		var groupResults []core.TestResult
+
+		// Run tests in this group sequentially with optimized cleanup
+		for j, testFunc := range group.TestFuncs {
+			testName := group.TestNames[j]
+
+			// OPTIMIZED: Only cleanup policies between tests (reuse pods for speed)
+			orchestrator.OptimizedPreTestCleanup(groupCtx, testName)
+
+			// Track test execution time
+			testStart := time.Now()
+
+			// Print test start
+			fmt.Printf("Starting test %s (%d/%d)...\n", testName, j+1, len(group.TestFuncs))
+
+			// Execute the test with pod reuse for faster execution
+			result := testFunc(logger, t, groupCtx, false, verbose, currentTestNumber, totalTests)
+			testElapsed := core.ElapsedSeconds(testStart)
+			currentTestNumber++
+
+			// Print test completion with timing
+			fmt.Printf("Test %s completed: %s (%.2fs)\n", testName, result.Message, testElapsed)
+
+			// Enhance result with subgroup and test name information
+			enhancedMessage := fmt.Sprintf("[%s] %s: %s",
+				strings.ToUpper(group.Name),
+				testName,
+				result.Message)
+			result.Message = enhancedMessage
+
+			groupResults = append(groupResults, result)
+
+			// Emergency cleanup if test failed
+			if !result.Success {
+				orchestrator.EmergencyCleanup(groupCtx, fmt.Sprintf("Test %s failed", testName))
+			}
+
+			// OPTIMIZED DELAY: Reduced delay since we're reusing pods
+			if j < len(group.TestFuncs)-1 { // Don't delay after the last test in group
+				fmt.Printf("%s Policy cleanup pause for API rate limiting...\n",
+					time.Now().Format("2006-01-02 15:04:05"))
+				time.Sleep(2 * time.Second) // Reduced from 5s since we're only cleaning policies
+			}
+		}
+
+		// OPTIMIZED: Post-subgroup cleanup (still clean pods between subgroups for isolation)
+		orchestrator.OptimizedPostSubgroupCleanup(ctx, group.Name)
+
+		// Record group completion
+		groupEnd := time.Now()
+		elapsedTime := groupEnd.Sub(groupStart)
+
+		// Calculate passed tests for this group
+		passedCount := 0
+		for _, result := range groupResults {
+			if result.Success {
+				passedCount++
+			}
+		}
+
+		// Print enhanced mini summary for this subgroup
+		fmt.Printf("\n=== %s SUBGROUP COMPLETE ===\n", strings.ToUpper(group.Name))
+		for k, result := range groupResults {
+			testName := group.TestNames[k]
+			if result.Success {
+				fmt.Printf("✅ %s: PASSED (0.0s) - Network policy test completed\n", testName)
+			} else {
+				fmt.Printf("❌ %s: FAILED (0.0s) - %s\n", testName, result.Message)
+			}
+		}
+		fmt.Printf("📊 %s Summary: %d passed, %d failed (%.1fs total)\n",
+			strings.ToUpper(group.Name), passedCount, len(groupResults)-passedCount, elapsedTime.Seconds())
+
+		// Add test results to overall results list
+		for _, res := range groupResults {
+			allResults = append(allResults, res)
+		}
+
+		// OPTIMIZED: Reduced cooling period between groups
+		time.Sleep(1 * time.Second) // Reduced from 3s
+	}
+
+	return allResults
+}
+
+// executeL4TestGroupsWithTiming runs the test groups with timing data collection like L3 tests
+func executeL4TestGroupsWithTiming(t *core.Tester, ctx context.Context, groups []L4TestGroup, verbose bool) ([]core.TimedTestResult, []string) {
+	var timedResults []core.TimedTestResult
+	var testNames []string
+
+	// Use command logger singleton for JSONL logging
+	logger := core.GetGlobalMultiChannelLogger()
+	if logger == nil {
+		fmt.Printf("ERROR: Failed to get global multi-channel logger\n")
+		return timedResults, testNames
+	}
+
+	// Calculate total number of tests
+	totalTests := 0
+	for _, group := range groups {
+		totalTests += len(group.TestFuncs)
+	}
+
+	currentTestNumber := 1
+
+	// Execute subgroups with clean tree structure
+	for i, group := range groups {
+		// Print testing phase header before each subgroup
+		fmt.Println("\n🧪 TESTING PHASE")
+
+		// Determine tree connector
+		groupConnector := "├──"
+		if i == len(groups)-1 {
+			groupConnector = "└──"
+		}
+
+		// Print subgroup header
+		fmt.Printf("%s L4 Subgroup: %s (%d tests)\n", groupConnector, strings.ToUpper(group.Name), len(group.TestFuncs))
+
+		// Create group-specific context
+		groupCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
+
+		// Run tests in this group
+		for j, testFunc := range group.TestFuncs {
+			testName := group.TestNames[j]
+
+			// Determine test tree connector
+			testConnector := "│   ├──"
+			if i == len(groups)-1 {
+				testConnector = "    ├──"
+			}
+			if j == len(group.TestFuncs)-1 {
+				if i == len(groups)-1 {
+					testConnector = "    └──"
+				} else {
+					testConnector = "│   └──"
+				}
+			}
+
+			// Track test execution time
+			testStart := time.Now()
+
+			// Print test start
+			fmt.Printf("%s %s: Testing policies... ", testConnector, testName)
+
+			// Execute the test
+			result := testFunc(logger, t, groupCtx, false, verbose, currentTestNumber, totalTests)
+			testEnd := time.Now()
+			testElapsed := ElapsedSeconds(testStart)
+			currentTestNumber++
+
+			if result.Success {
+				// Capture REAL connectivity data during L4 policy tests instead of using fake data
+				connectivityResults := t.CaptureRealL4ConnectivityData(groupCtx, testName)
+
+				// If no real results captured, show empty results rather than fake data
+				// This maintains transparency about what actually happened during the test
+				if len(connectivityResults) == 0 {
+					connectivityResults = []core.ConnectivityResult{} // Empty - no fake data
+				}
+
+				// Create enhanced test result with real connectivity data (or empty if none captured)
+				enhancedResult := core.CreateEnhancedTestResultWithExpectation(result, testName+"-policy", connectivityResults, nil)
+				formattedResult := core.FormatEnhancedTestResultForHierarchy(testName, enhancedResult, testElapsed, verbose)
+				fmt.Print(formattedResult)
+			} else {
+				// For failed tests, print newline first to break from tree structure
+				fmt.Print("\n")
+
+				// For failed tests in verbose mode, get real command history and create proper enhanced result
+				if verbose {
+					executor := t.GetLastExecutor()
+					if executor != nil {
+						failurePoint := "HTTP connectivity test"
+						// Adjust failure point based on test type
+						switch {
+						case strings.Contains(testName, "icmp"):
+							failurePoint = "ICMP connectivity test"
+						case strings.Contains(testName, "sni"):
+							failurePoint = "TLS/SNI connectivity test"
+						default:
+							failurePoint = "HTTP connectivity test"
+						}
+
+						errorDetails := core.ExtractErrorDetailsFromCommand(executor.GetCommandHistory(), "L4 policy validation")
+						enhancedResult := core.CreateEnhancedTestResult(result, executor, failurePoint, errorDetails)
+
+						// Use the verbose failure formatting that shows command history
+						formattedResult := core.FormatVerboseTestFailure(testName, testElapsed, enhancedResult.ExecutedCommands, enhancedResult.FailurePoint, enhancedResult.ErrorDetails)
+						fmt.Print(formattedResult)
+					} else {
+						// Fallback if no executor available
+						fmt.Printf("❌ %s FAILED (%.1fs)", testName, testElapsed)
+					}
+				} else {
+					// Non-verbose mode: simple failure message
+					fmt.Printf("❌ %s FAILED (%.1fs)", testName, testElapsed)
+				}
+			}
+
+			// Add visual separator line after every test completion
+			fmt.Println("\n────────────────────────────────────────────────────────")
+
+			// Create TimedTestResult
+			timedResult := core.TimedTestResult{
+				TestResult: result,
+				StartTime:  testStart,
+				EndTime:    testEnd,
+			}
+
+			// Store results
+			timedResults = append(timedResults, timedResult)
+			testNames = append(testNames, testName)
+
+			// Enhanced JSONL logging: Capture real command history and error details
+			hierarchy := &core.HierarchyContext{
+				GroupId:    "l4-policies",
+				SubgroupId: group.Name,
+				TestId:     testName,
+				Phase:      "execution",
+			}
+
+			// Get enhanced error details if test failed
+			if !result.Success {
+				executor := t.GetLastExecutor()
+				if executor != nil {
+					failurePoint := "HTTP connectivity test"
+					errorDetails := core.ExtractErrorDetailsFromCommand(executor.GetCommandHistory(), "L4 port policy validation")
+					enhancedResult := core.CreateEnhancedTestResult(result, executor, failurePoint, errorDetails)
+
+					// Use enhanced logging to capture command history in JSONL
+					logger.GetFrontendLogger().LogL4TestCompleteWithDetails(testName, group.Name, currentTestNumber-1, totalTests, result.Success, testElapsed, hierarchy, &enhancedResult)
+				} else {
+					// Fallback to basic logging
+					logger.GetFrontendLogger().LogL4TestComplete(testName, group.Name, currentTestNumber-1, totalTests, result.Success, testElapsed, hierarchy)
+				}
+			} else {
+				// Use basic logging for successful tests
+				logger.GetFrontendLogger().LogL4TestComplete(testName, group.Name, currentTestNumber-1, totalTests, result.Success, testElapsed, hierarchy)
+			}
+
+			// Brief cooling period between tests
+			if j < len(group.TestFuncs)-1 {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		// Cooling period between groups
+		if i < len(groups)-1 {
+			time.Sleep(3 * time.Second)
+		}
+	}
+
+	return timedResults, testNames
+}
+
+// TestL4Policies runs all L4 policy tests (legacy function - uses TestL4PoliciesSequential)
+func TestL4Policies(t *core.Tester, ctx context.Context, verbose bool) []TestResult {
+	// Use the main sequential function with all subgroups
+	allSubgroups := []string{"port", "icmp", "tls-sni"}
+	return TestL4PoliciesSequential(t, ctx, allSubgroups, verbose)
+}
