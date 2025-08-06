@@ -19,21 +19,21 @@ spec:
            protocol: ANY
         rules:
           dns:
-            # External domains - exact match required
-            - matchName: "cilium.io"
-            - matchName: "api.cilium.io"
-            - matchName: "docs.cilium.io"
-            - matchName: "github.com"
-            - matchName: "registry-1.docker.io"
+            # External domains - exact match required (using dynamic template variables)
+            - matchName: "{{CILIUM_BASE_DOMAIN}}"  # Base domain extracted from {{CILIUM_DOMAIN_WILDCARD}}
+            - matchName: "{{CILIUM_API_DOMAIN}}"
+            - matchName: "{{CILIUM_DOCS_DOMAIN}}"
+            - matchName: "{{GITHUB_BASE_DOMAIN}}"  # Base domain extracted from {{GITHUB_DOMAIN_WILDCARD}}
+            - matchName: "{{DOCKER_REGISTRY_DOMAIN}}"  # Dynamic Docker registry domain
             
-            # Kubernetes internal services - exact match
-            - matchName: "kubernetes.default.svc.cluster.local"
-            - matchName: "kube-dns.kube-system.svc.cluster.local"
-            - matchName: "metrics-server.kube-system.svc.cluster.local"
+            # Kubernetes internal services - exact match (using cluster domain)
+            - matchName: "kubernetes.default.svc.{{CLUSTER_DOMAIN}}"
+            - matchName: "kube-dns.kube-system.svc.{{CLUSTER_DOMAIN}}"
+            - matchName: "metrics-server.kube-system.svc.{{CLUSTER_DOMAIN}}"
             
-            # Application-specific services
-            - matchName: "postgres.database.svc.cluster.local"
-            - matchName: "redis.cache.svc.cluster.local"
+            # Application-specific services (using dynamic cluster domain)
+            - matchName: "postgres.database.svc.{{CLUSTER_DOMAIN}}"
+            - matchName: "redis.cache.svc.{{CLUSTER_DOMAIN}}"
 
   # Allow actual traffic to target pods/services after DNS resolution
   - toEndpoints:
@@ -43,11 +43,3 @@ spec:
     - ports:
       - port: "80"
         protocol: TCP
-
-  # Allow ICMP (ping) to target pods
-  - toEndpoints:
-    - matchLabels:
-        app: api
-    icmps:
-    - fields:
-      - type: 8  # ICMP Echo Request (ping)

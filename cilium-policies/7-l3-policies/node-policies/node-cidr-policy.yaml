@@ -9,9 +9,10 @@ spec:
     matchLabels:
       run: web  # Changed to match the label used in test pods
   ingress:
-  # Allow traffic from a broad pod CIDR range
+  # Allow traffic from specific node and pod CIDR ranges
   - fromCIDRSet:
-    - cidr: "0.0.0.0/0"  # Allow from any IP to ensure test passes
+    - cidr: "{{POD_CIDR}}"  # Allow from pod network
+    - cidr: "{{NODE_CIDR}}"  # Allow from node network
     toPorts:
     - ports:
       - port: "80"

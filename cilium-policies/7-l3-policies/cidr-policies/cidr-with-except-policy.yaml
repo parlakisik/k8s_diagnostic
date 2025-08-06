@@ -20,9 +20,9 @@ spec:
         protocol: TCP
   # Allow traffic from the primary node CIDR but exclude a specific subnet
   - fromCIDRSet:
-    - cidr: "10.0.0.0/16"  # Allow pod network
+    - cidr: "{{POD_CIDR}}"  # Allow pod network
       except:
-      - "10.0.1.0/24"      # Except a specific subnet
+      - "{{EXCEPT_CIDR}}"      # Except a specific subnet
     toPorts:
     - ports:
       - port: "80"

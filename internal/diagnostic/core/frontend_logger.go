@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -403,6 +404,110 @@ func (f *FrontendJSONLogger) LogSuiteStartWithInfrastructure(totalTests int, gro
 	}
 
 	return f.LogEntry(FrontendLevelInfo, EventSuiteStart, "Starting Kubernetes diagnostic tests", data)
+}
+
+// LogTemplateVariableDiscovery logs template variable discovery status to show discovered vs fallback values
+func (f *FrontendJSONLogger) LogTemplateVariableDiscovery(templateVars *TemplateVariables, testName string, hierarchy *HierarchyContext) error {
+	if templateVars == nil || templateVars.DiscoveryStatus == nil {
+		return nil // No discovery data to log
+	}
+
+	// Categorize variables by discovery status
+	discovered := make(map[string]string)
+	fallbacks := make(map[string]string)
+	derived := make(map[string]string)
+
+	// Count statistics
+	discoveredCount := 0
+	fallbackCount := 0
+	derivedCount := 0
+
+	// Process all template variables and their discovery status
+	variableValues := map[string]string{
+		"POD_CIDR":                   templateVars.PodCIDR,
+		"NODE_CIDR":                  templateVars.NodeCIDR,
+		"NODE1_CIDR":                 templateVars.Node1CIDR,
+		"EXCEPT_CIDR":                templateVars.ExceptCIDR,
+		"CLUSTER_DOMAIN":             templateVars.ClusterDomain,
+		"DNS_SERVER1":                templateVars.DNSServer1,
+		"DNS_SERVER2":                templateVars.DNSServer2,
+		"API_DOMAIN":                 templateVars.APIDomain,
+		"CILIUM_DOMAIN_WILDCARD":     templateVars.CiliumDomainWildcard,
+		"GITHUB_DOMAIN_WILDCARD":     templateVars.GithubDomainWildcard,
+		"DOCKER_DOMAIN_WILDCARD":     templateVars.DockerDomainWildcard,
+		"GOOGLEAPIS_DOMAIN_WILDCARD": templateVars.GoogleapisDomainWildcard,
+		"AWS_DOMAIN_WILDCARD":        templateVars.AWSDomainWildcard,
+		"CILIUM_BASE_DOMAIN":         templateVars.CiliumBaseDomain,
+		"CILIUM_API_DOMAIN":          templateVars.CiliumAPIDomain,
+		"CILIUM_DOCS_DOMAIN":         templateVars.CiliumDocsDomain,
+		"GITHUB_BASE_DOMAIN":         templateVars.GithubBaseDomain,
+		"DOCKER_REGISTRY_DOMAIN":     templateVars.DockerRegistryDomain,
+		"TEST_DOMAIN_PATTERN":        templateVars.TestDomainPattern,
+	}
+
+	// Categorize each variable based on its discovery status
+	for varName, value := range variableValues {
+		if status, exists := templateVars.DiscoveryStatus[varName]; exists {
+			statusLower := strings.ToLower(status)
+			switch {
+			case strings.Contains(statusLower, "fallback"):
+				fallbacks[varName] = value
+				fallbackCount++
+			case strings.Contains(statusLower, "derived") || strings.Contains(statusLower, "calculated") || strings.Contains(statusLower, "extracted"):
+				derived[varName] = value
+				derivedCount++
+			default:
+				discovered[varName] = value
+				discoveredCount++
+			}
+		}
+	}
+
+	// Calculate reliability score
+	totalVars := discoveredCount + fallbackCount + derivedCount
+	reliabilityScore := 0.0
+	if totalVars > 0 {
+		// Discovered = 1.0, Derived = 0.8, Fallback = 0.3
+		reliabilityScore = (float64(discoveredCount)*1.0 + float64(derivedCount)*0.8 + float64(fallbackCount)*0.3) / float64(totalVars)
+	}
+
+	// Determine overall discovery quality
+	var discoveryQuality string
+	var qualityLevel FrontendLogLevel
+	if reliabilityScore >= 0.8 {
+		discoveryQuality = "HIGH"
+		qualityLevel = FrontendLevelSuccess
+	} else if reliabilityScore >= 0.6 {
+		discoveryQuality = "MEDIUM"
+		qualityLevel = FrontendLevelWarning
+	} else {
+		discoveryQuality = "LOW"
+		qualityLevel = FrontendLevelWarning
+	}
+
+	// Build log entry data
+	data := map[string]interface{}{
+		"testName":         testName,
+		"discoveryQuality": discoveryQuality,
+		"reliabilityScore": fmt.Sprintf("%.1f", reliabilityScore*100),
+		"totalVariables":   totalVars,
+		"discoveredCount":  discoveredCount,
+		"derivedCount":     derivedCount,
+		"fallbackCount":    fallbackCount,
+		"discoveredValues": discovered,
+		"derivedValues":    derived,
+		"fallbackValues":   fallbacks,
+	}
+
+	// Add detailed discovery status for debugging
+	if len(templateVars.DiscoveryStatus) > 0 {
+		data["discoveryStatus"] = templateVars.DiscoveryStatus
+	}
+
+	message := fmt.Sprintf("Template variable discovery completed for %s - Quality: %s (%d discovered, %d derived, %d fallback)",
+		testName, discoveryQuality, discoveredCount, derivedCount, fallbackCount)
+
+	return f.LogEntryWithHierarchy(qualityLevel, EventStep, message, data, hierarchy)
 }
 
 func (f *FrontendJSONLogger) LogSuiteComplete(totalTests, passed, failed int, duration float64) error {
