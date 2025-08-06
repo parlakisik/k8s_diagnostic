@@ -20,24 +20,24 @@ spec:
         rules:
           dns:
             # External domain patterns
-            - matchPattern: "*.cilium.io"          # All cilium.io subdomains
-            - matchPattern: "*.github.com"         # All github.com subdomains  
-            - matchPattern: "*.docker.io"          # All docker.io subdomains
-            - matchPattern: "*.googleapis.com"     # Google APIs
-            - matchPattern: "*.amazonaws.com"      # AWS services
+            - matchPattern: "{{CILIUM_DOMAIN_WILDCARD}}"          # All cilium.io subdomains
+            - matchPattern: "{{GITHUB_DOMAIN_WILDCARD}}"         # All github.com subdomains  
+            - matchPattern: "{{DOCKER_DOMAIN_WILDCARD}}"          # All docker.io subdomains
+            - matchPattern: "{{GOOGLEAPIS_DOMAIN_WILDCARD}}"     # Google APIs
+            - matchPattern: "{{AWS_DOMAIN_WILDCARD}}"      # AWS services
             
             # Kubernetes service patterns (standard format)
-            - matchPattern: "*.*.svc.cluster.local"    # service.namespace.svc.cluster.local
-            - matchPattern: "*.kube-system.svc.cluster.local"  # All kube-system services
+            - matchPattern: "*.*.svc.{{CLUSTER_DOMAIN}}"    # service.namespace.svc.cluster.local
+            - matchPattern: "*.kube-system.svc.{{CLUSTER_DOMAIN}}"  # All kube-system services
             
             # Development and testing patterns
             - matchPattern: "*.local"              # Local development domains
-            - matchPattern: "test-*.example.com"   # Test environments
+            - matchPattern: "{{TEST_DOMAIN_PATTERN}}"   # Test environments
             - matchPattern: "*-dev.internal"       # Development services
             
-            # Monitoring and observability patterns
-            - matchPattern: "*.monitoring.svc.cluster.local"
-            - matchPattern: "prometheus-*.svc.cluster.local"
+            # Monitoring and observability patterns (using dynamic cluster domain)
+            - matchPattern: "*.monitoring.svc.{{CLUSTER_DOMAIN}}"
+            - matchPattern: "prometheus-*.svc.{{CLUSTER_DOMAIN}}"
             
             # NOTE: Uncomment the next line to allow ALL DNS queries (use with caution)
             # - matchPattern: "*"

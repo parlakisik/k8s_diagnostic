@@ -32,12 +32,12 @@ spec:
         # Allow GET requests to specific API host only
         - method: "GET"
           path: "/api/v1/.*"
-          host: "api.example.com"
+          host: "{{API_DOMAIN}}"
           
         # Allow PUT requests with host and header requirements  
         - method: "PUT"
           path: "/api/v2/.*"
-          host: "v2.api.example.com"
+          host: "{{API_V2_DOMAIN}}"
           headers:
           - 'Authorization: Bearer .*'
           - 'X-API-Version: v2'

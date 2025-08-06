@@ -16,14 +16,14 @@ spec:
         protocol: TCP
       serverNames:
       # Allowed domains - exact matches
-      - "one.one.one.one"     # Cloudflare DNS
-      - "dns.google"          # Google DNS
-      - "api.example.com"     # Example API
-      - "kubernetes.io"       # Kubernetes documentation
+      - "{{DNS_SERVER_1}}"     # Primary DNS server
+      - "{{DNS_SERVER_2}}"          # Secondary DNS server
+      - "{{API_DOMAIN}}"     # Example API
+      - "{{K8S_DOCS_DOMAIN}}"       # Kubernetes documentation
       
       # Wildcards are supported for subdomains
-      - "*.github.com"        # GitHub and subdomains
-      - "*.amazonaws.com"     # AWS services
+      - "{{GITHUB_DOMAIN_WILDCARD}}"        # GitHub and subdomains
+      - "{{AWS_DOMAIN_WILDCARD}}"     # AWS services
 
   # Allow DNS resolution to function properly
   - toPorts:
