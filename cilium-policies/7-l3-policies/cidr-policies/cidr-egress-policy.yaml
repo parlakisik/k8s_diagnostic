@@ -4,15 +4,14 @@ metadata:
   name: "cidr-egress-policy"
   namespace: "{{NS_NAME}}"
 spec:
-  description: "Allow egress traffic from client2 to API pod via NODE1_CIDR"
+  description: "Allow egress traffic from client to API pod via specific CIDR"
   endpointSelector:
     matchLabels:
       app: client
-      location: node2
   egress:
   # Allow traffic to the target pod's CIDR
-  - toCIDR:
-    - "{{NODE1_CIDR}}"
+  - toCIDRSet:
+    - cidr: "10.0.0.0/16"
     toPorts:
     - ports:
       - port: "80"

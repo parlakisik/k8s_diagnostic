@@ -13,6 +13,35 @@ Cilium supports several types of L3 network policies, each targeting different a
 5. **DNS-based Policies**: Manage egress traffic to specific domain names
 6. **Service-based Policies**: Control traffic to Kubernetes Services
 
+## Testing Implementation Overview
+
+The L3 policy testing suite in this repository provides **automated validation** of all Cilium L3 network policy types. Our testing approach ensures:
+
+- **Comprehensive Coverage**: Tests all 11 distinct L3 policy scenarios across 6 categories
+- **Real-world Validation**: Uses actual pod-to-pod communication, not simulation  
+- **Clean Test Isolation**: Each test runs in a dedicated environment with complete cleanup
+- **Production Readiness**: Validates policies under realistic network conditions
+- **Detailed Reporting**: Provides clear pass/fail results with specific failure reasons
+
+### Test Architecture
+
+**Test Environment:**
+- Dedicated test namespaces for isolation
+- Client and target pod pairs for traffic generation
+- Actual Cilium policy deployment and validation
+- Multi-protocol testing (HTTP, ICMP, DNS)
+
+**Execution Model:**
+- Sequential test execution to prevent policy conflicts
+- API rate limiting prevention with smart delays
+- Automatic retry logic for transient failures
+- Comprehensive logging and JSON reporting
+
+**Integration:**
+- CLI tool: `./k8s-diagnostic test --test-group l3-policies`
+- Standalone script: `./test-l3-policies.sh`
+- Selective testing: `--l3-subgroups ip-cidr,entities`
+
 ## 1. Label-Based Policies
 
 Label-based policies are the most common type and form the foundation of Cilium's network policy model.
