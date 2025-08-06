@@ -12,7 +12,7 @@ spec:
   - fromEndpoints:
     - matchLabels:
         app: client
-        location: node1
+        location: "{{NODE1}}"
     toPorts:
     - ports:
       - port: "80"

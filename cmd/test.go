@@ -136,19 +136,17 @@ type CommandExecution struct {
 
 // TestSuiteResult represents the complete test suite results for JSON output
 type TestSuiteResult struct {
-	Timestamp           time.Time            `json:"timestamp"`
-	TestConfiguration   TestConfiguration    `json:"test_configuration"`
-	Infrastructure      InfrastructureStatus `json:"infrastructure"`
-	TotalTests          int                  `json:"total_tests"`
-	PassedTests         int                  `json:"passed_tests"`
-	FailedTests         int                  `json:"failed_tests"`
-	SkippedTests        int                  `json:"skipped_tests"`
-	SuccessRate         float64              `json:"success_rate"`
-	TotalTime           float64              `json:"total_time_seconds"`
-	Tests               []TestSummaryEntry   `json:"tests"`
-	OverallHealthStatus string               `json:"overall_health_status"`
-	Recommendations     []string             `json:"recommendations,omitempty"`
-	TroubleshootingTips []string             `json:"troubleshooting_tips,omitempty"`
+	Timestamp           time.Time                   `json:"timestamp"`
+	TestConfiguration   TestConfiguration           `json:"test_configuration"`
+	Infrastructure      *core.ClusterInfrastructure `json:"infrastructure"`
+	TotalTests          int                         `json:"total_tests"`
+	PassedTests         int                         `json:"passed_tests"`
+	FailedTests         int                         `json:"failed_tests"`
+	SkippedTests        int                         `json:"skipped_tests"`
+	SuccessRate         float64                     `json:"success_rate"`
+	TotalTime           float64                     `json:"total_time_seconds"`
+	Tests               []TestSummaryEntry          `json:"tests"`
+	OverallHealthStatus string                      `json:"overall_health_status"`
 }
 
 // TestConfiguration contains test run configuration
@@ -168,8 +166,9 @@ func generateJSONSummary(timedResults []core.TimedTestResult, testNames []string
 		return fmt.Errorf("failed to create test_results directory: %v", err)
 	}
 
-	// Collect infrastructure status
-	infrastructure := collectInfrastructureStatus(tester, ctx)
+	// Collect real infrastructure data using InfrastructureCollector instead of static mock data
+	infrastructureCollector := core.NewInfrastructureCollector(tester.GetClientset(), testConfig.VerboseMode)
+	infrastructure := infrastructureCollector.CollectInfrastructure(ctx)
 
 	// Prepare test entries with comprehensive details
 	var tests []TestSummaryEntry
@@ -228,17 +227,13 @@ func generateJSONSummary(timedResults []core.TimedTestResult, testNames []string
 		successRate = float64(passed) / float64(len(timedResults)) * 100.0
 	}
 
-	// Determine overall health status
+	// Determine overall health status based on real infrastructure data
 	overallHealthStatus := "HEALTHY"
 	if failed > 0 {
 		overallHealthStatus = "UNHEALTHY"
-	} else if !infrastructure.CiliumStatus.Healthy {
+	} else if infrastructure.HasCriticalErrors() {
 		overallHealthStatus = "WARNING"
 	}
-
-	// Generate recommendations and troubleshooting tips
-	recommendations := generateRecommendations(infrastructure, failed, passed)
-	troubleshootingTips := generateTroubleshootingTips(infrastructure, tests)
 
 	// Create comprehensive summary result
 	summary := TestSuiteResult{
@@ -253,8 +248,6 @@ func generateJSONSummary(timedResults []core.TimedTestResult, testNames []string
 		TotalTime:           totalTime,
 		Tests:               tests,
 		OverallHealthStatus: overallHealthStatus,
-		Recommendations:     recommendations,
-		TroubleshootingTips: troubleshootingTips,
 	}
 
 	// Create JSON file
@@ -276,172 +269,101 @@ func generateJSONSummary(timedResults []core.TimedTestResult, testNames []string
 	return nil
 }
 
-// collectInfrastructureStatus gathers cluster, Cilium, and deployment status
-func collectInfrastructureStatus(tester *core.Tester, ctx context.Context) InfrastructureStatus {
-	infrastructure := InfrastructureStatus{}
-
-	// Collect cluster information
-	infrastructure.ClusterInfo = collectClusterInfo(tester, ctx)
-
-	// Collect Cilium status
-	infrastructure.CiliumStatus = collectCiliumStatus(tester, ctx)
-
-	// Collect namespace information
-	infrastructure.NamespaceInfo = collectNamespaceInfo(tester, ctx)
-
-	// Collect pod deployments
-	infrastructure.PodDeployments = collectPodDeployments(tester, ctx)
-
-	// Collect service status
-	infrastructure.ServiceStatus = collectServiceStatus(tester, ctx)
-
-	// Collect node information
-	infrastructure.NodeInfo = collectNodeInfo(tester, ctx)
-
-	return infrastructure
-}
-
-// collectClusterInfo gathers basic cluster information
-func collectClusterInfo(tester *core.Tester, ctx context.Context) ClusterInfo {
-	clusterInfo := ClusterInfo{
-		Accessible: true,
-	}
-
-	// Get current context (simplified - would need actual kubectl context info)
-	clusterInfo.Context = "current-context"
-
-	// Get cluster nodes count (simplified)
-	clusterInfo.ClusterNodes = 3 // This would be dynamically determined
-
-	// Get Kubernetes version (simplified)
-	clusterInfo.KubernetesVersion = "v1.28.0" // This would be dynamically determined
-
-	return clusterInfo
-}
-
-// collectCiliumStatus gathers Cilium CNI health information
-func collectCiliumStatus(tester *core.Tester, ctx context.Context) CiliumStatus {
-	ciliumStatus := CiliumStatus{
-		Installed:      true,
-		Healthy:        true,
-		Version:        "1.14.x",
-		Agents:         3,
-		ConnectivityOK: true,
-		PolicyEnabled:  true,
-	}
-
-	// This would include actual Cilium health checks
-	return ciliumStatus
-}
-
-// collectNamespaceInfo gathers test namespace information
-func collectNamespaceInfo(tester *core.Tester, ctx context.Context) NamespaceInfo {
-	return NamespaceInfo{
-		Name:       tester.GetNamespace(),
-		Created:    true,
-		Accessible: true,
-	}
-}
-
-// collectPodDeployments gathers pod deployment status
-func collectPodDeployments(tester *core.Tester, ctx context.Context) []PodDeploymentInfo {
-	// This would collect actual pod information from the cluster
-	return []PodDeploymentInfo{
-		{
-			Name:         "test-pod-1",
-			Namespace:    tester.GetNamespace(),
-			Ready:        true,
-			Status:       "Running",
-			RestartCount: 0,
-			Node:         "worker-node-1",
-			PodIP:        "10.244.1.10",
-			CreationTime: time.Now().Format(time.RFC3339),
-		},
-	}
-}
-
-// collectServiceStatus gathers service deployment and accessibility
-func collectServiceStatus(tester *core.Tester, ctx context.Context) []ServiceStatusInfo {
-	// This would collect actual service information from the cluster
-	return []ServiceStatusInfo{
-		{
-			Name:       "test-service",
-			Type:       "ClusterIP",
-			ClusterIP:  "10.96.1.100",
-			Ports:      []string{"80/TCP"},
-			Ready:      true,
-			Accessible: true,
-		},
-	}
-}
-
-// collectNodeInfo gathers cluster node information
-func collectNodeInfo(tester *core.Tester, ctx context.Context) []NodeInfo {
-	// This would collect actual node information from the cluster
-	return []NodeInfo{
-		{
-			Name:              "control-plane",
-			Status:            "Ready",
-			Roles:             "control-plane",
-			KubernetesVersion: "v1.28.0",
-			CiliumReady:       true,
-			ContainerRuntime:  "containerd",
-		},
-		{
-			Name:              "worker-node-1",
-			Status:            "Ready",
-			Roles:             "worker",
-			KubernetesVersion: "v1.28.0",
-			CiliumReady:       true,
-			ContainerRuntime:  "containerd",
-		},
-	}
-}
-
-// generateRecommendations creates actionable recommendations based on test results
-func generateRecommendations(infrastructure InfrastructureStatus, failed, passed int) []string {
+// generateRecommendationsFromRealInfrastructure creates actionable recommendations based on real infrastructure data
+func generateRecommendationsFromRealInfrastructure(infrastructure *core.ClusterInfrastructure, failed, passed int) []string {
 	var recommendations []string
 
 	if failed > 0 {
 		recommendations = append(recommendations, "Review failed test error details for specific connectivity issues")
 		recommendations = append(recommendations, "Check pod logs and events for deployment issues")
-		recommendations = append(recommendations, "Verify Cilium agent status on all nodes")
+
+		// Use real CNI provider information
+		if infrastructure.CNIProvider == "cilium" {
+			recommendations = append(recommendations, "Verify Cilium agent status on all nodes")
+		} else if infrastructure.CNIProvider != "" {
+			recommendations = append(recommendations, fmt.Sprintf("Check %s CNI health and configuration", infrastructure.CNIProvider))
+		}
 	}
 
-	if !infrastructure.CiliumStatus.Healthy {
-		recommendations = append(recommendations, "Investigate Cilium CNI health issues")
-		recommendations = append(recommendations, "Check Cilium configuration and policies")
+	if infrastructure.HasCriticalErrors() {
+		recommendations = append(recommendations, "Investigate cluster infrastructure issues")
+		for _, err := range infrastructure.CollectionErrors {
+			if strings.Contains(err, "cilium") || strings.Contains(err, "CNI") {
+				recommendations = append(recommendations, "Check CNI configuration and policies")
+				break
+			}
+		}
 	}
 
-	if infrastructure.ClusterInfo.ClusterNodes < 2 {
+	if infrastructure.NodeCount < 2 {
 		recommendations = append(recommendations, "Consider adding more nodes for high availability testing")
+	}
+
+	// Platform-specific recommendations
+	switch infrastructure.Platform {
+	case "kind":
+		recommendations = append(recommendations, "Kind cluster detected - ensure LoadBalancer support if testing external services")
+	case "eks":
+		recommendations = append(recommendations, "AWS EKS detected - verify VPC CNI and security group configurations")
+	case "gke":
+		recommendations = append(recommendations, "Google GKE detected - check GKE network policy settings")
+	case "aks":
+		recommendations = append(recommendations, "Azure AKS detected - verify Azure CNI and network security groups")
 	}
 
 	if len(recommendations) == 0 {
 		recommendations = append(recommendations, "All tests passed successfully - cluster networking is healthy")
+		recommendations = append(recommendations, fmt.Sprintf("Cluster running %s with %s CNI is functioning optimally", infrastructure.KubernetesVersion, infrastructure.CNIProvider))
 	}
 
 	return recommendations
 }
 
-// generateTroubleshootingTips provides specific troubleshooting guidance
-func generateTroubleshootingTips(infrastructure InfrastructureStatus, tests []TestSummaryEntry) []string {
+// generateTroubleshootingTipsFromRealInfrastructure provides specific troubleshooting guidance based on real infrastructure
+func generateTroubleshootingTipsFromRealInfrastructure(infrastructure *core.ClusterInfrastructure, tests []TestSummaryEntry) []string {
 	var tips []string
 
 	for _, test := range tests {
 		if !test.Success {
 			switch test.Name {
 			case "Pod-to-Pod Connectivity":
-				tips = append(tips, "Check Cilium pod logs: kubectl logs -n kube-system -l k8s-app=cilium")
+				if infrastructure.CNIProvider == "cilium" {
+					tips = append(tips, "Check Cilium pod logs: kubectl logs -n kube-system -l k8s-app=cilium")
+					tips = append(tips, "Verify Cilium network policies: kubectl get ciliumnetworkpolicies --all-namespaces")
+				} else {
+					tips = append(tips, fmt.Sprintf("Check %s CNI pod logs and configuration", infrastructure.CNIProvider))
+				}
 				tips = append(tips, "Verify node network connectivity and firewall rules")
 			case "DNS Resolution":
 				tips = append(tips, "Check CoreDNS status: kubectl get pods -n kube-system -l k8s-app=kube-dns")
-				tips = append(tips, "Verify DNS policy configuration in Cilium")
+				if infrastructure.CNIProvider == "cilium" {
+					tips = append(tips, "Verify DNS policy configuration in Cilium")
+				}
 			case "Service-to-Pod Connectivity":
 				tips = append(tips, "Check service endpoints: kubectl get endpoints")
 				tips = append(tips, "Verify kube-proxy configuration and iptables rules")
 			}
 		}
+	}
+
+	// Add infrastructure-specific troubleshooting tips
+	if infrastructure.HasCriticalErrors() {
+		tips = append(tips, "Infrastructure collection errors detected:")
+		for _, err := range infrastructure.CollectionErrors {
+			tips = append(tips, fmt.Sprintf("  - %s", err))
+		}
+	}
+
+	// Platform-specific troubleshooting
+	switch infrastructure.Platform {
+	case "kind":
+		tips = append(tips, "Kind cluster troubleshooting: docker ps, kind get clusters")
+	case "eks":
+		tips = append(tips, "AWS EKS troubleshooting: check VPC, security groups, and IAM roles")
+	case "gke":
+		tips = append(tips, "Google GKE troubleshooting: gcloud container clusters describe")
+	case "aks":
+		tips = append(tips, "Azure AKS troubleshooting: az aks show, check NSGs")
 	}
 
 	if len(tips) == 0 {
@@ -452,6 +374,7 @@ func generateTroubleshootingTips(infrastructure InfrastructureStatus, tests []Te
 	// Add general troubleshooting tips
 	tips = append(tips, "Use 'kubectl describe' commands to get detailed resource information")
 	tips = append(tips, "Check cluster events: kubectl get events --sort-by=.metadata.creationTimestamp")
+	tips = append(tips, fmt.Sprintf("Cluster info: %s", infrastructure.GetInfrastructureSummary()))
 
 	return tips
 }
@@ -1127,10 +1050,40 @@ All test resources will be created in the specified namespace (default: diagnost
 
 			} else {
 				// Multiple arguments without "groups:" or "list:" prefix
+				// Detect common mistake patterns before treating as individual tests
+				if len(args) >= 2 {
+					// Common pattern: "group l3" or "test l3"
+					if args[0] == "group" && len(args) == 2 {
+						suggestedGroup := resolveGroupName(args[1])
+						if _, exists := testGroups[suggestedGroup]; exists {
+							fmt.Printf("❌ ERROR: Invalid syntax 'group %s'\n", args[1])
+							fmt.Printf("💡 Did you mean: './k8s_diagnostic test %s' ?\n", args[1])
+							fmt.Printf("💡 Or try: './k8s_diagnostic test groups: %s'\n", args[1])
+							return
+						} else {
+							fmt.Printf("❌ ERROR: Invalid syntax 'group %s' with unknown group\n", args[1])
+							showAvailableOptions()
+							return
+						}
+					}
+					// Pattern: "test something" (likely meant as group)
+					if args[0] == "test" && len(args) == 2 {
+						fmt.Printf("❌ ERROR: Invalid nested 'test' command\n")
+						fmt.Printf("💡 Try: './k8s_diagnostic test %s' (without extra 'test')\n", args[1])
+						return
+					}
+				}
+
 				// Treat as individual test names for backward compatibility
 				testList = args
 				fmt.Printf("Detected multiple arguments as individual tests: %v\n", args)
 			}
+		}
+
+		// CRITICAL: Early validation before any expensive operations
+		if err := performEarlyValidation(testGroup, testList); err != nil {
+			fmt.Printf("❌ %s\n", err.Error())
+			return
 		}
 
 		// PHASE 2: Initialize command-level singleton logger
@@ -1616,6 +1569,123 @@ func createDisplayNamesForIndividualTests(testNames []string) map[string]string 
 	}
 
 	return displayNames
+}
+
+// performEarlyValidation performs validation before expensive operations
+func performEarlyValidation(testGroup string, testList []string) error {
+	// Skip validation if both are empty (will use defaults)
+	if testGroup == "" && len(testList) == 0 {
+		return nil
+	}
+
+	// Validate test group if specified
+	if testGroup != "" && testGroup != "multi-group" {
+		if _, exists := testGroups[testGroup]; !exists {
+			// Check if it might be an unresolved alias
+			resolvedGroup := resolveGroupName(testGroup)
+			if _, exists := testGroups[resolvedGroup]; !exists {
+				return fmt.Errorf("Unknown test group '%s'\n💡 Available groups: %s\n💡 Try: './k8s_diagnostic test --help' for usage examples",
+					testGroup, strings.Join(getAvailableGroups(), ", "))
+			}
+		}
+	}
+
+	// Validate individual tests if specified
+	if len(testList) > 0 && testGroup != "multi-group" {
+		invalidTests := findInvalidTests(testList)
+		if len(invalidTests) > 0 {
+			suggestions := generateTestSuggestions(invalidTests)
+			return fmt.Errorf("Unknown test(s): %s\n%s\n💡 Use './k8s_diagnostic test --help' for available options",
+				strings.Join(invalidTests, ", "), suggestions)
+		}
+	}
+
+	return nil
+}
+
+// findInvalidTests returns a list of test names that don't exist
+func findInvalidTests(testNames []string) []string {
+	var invalidTests []string
+
+	for _, testName := range testNames {
+		// Check if it's a direct test ID or valid alias
+		if _, exists := availableTests[testName]; !exists {
+			if _, isAlias := testAliases[testName]; !isAlias {
+				invalidTests = append(invalidTests, testName)
+			}
+		}
+	}
+
+	return invalidTests
+}
+
+// generateTestSuggestions provides helpful suggestions for invalid test names
+func generateTestSuggestions(invalidTests []string) string {
+	var suggestions []string
+
+	for _, invalidTest := range invalidTests {
+		// Look for partial matches in available tests
+		var matches []string
+		for testId := range availableTests {
+			if strings.Contains(testId, invalidTest) || strings.Contains(invalidTest, testId) {
+				matches = append(matches, testId)
+			}
+		}
+
+		// Look for partial matches in aliases
+		for alias := range testAliases {
+			if strings.Contains(alias, invalidTest) || strings.Contains(invalidTest, alias) {
+				matches = append(matches, alias)
+			}
+		}
+
+		if len(matches) > 0 {
+			if len(matches) > 3 {
+				matches = matches[:3] // Limit suggestions
+			}
+			suggestions = append(suggestions, fmt.Sprintf("💡 Did you mean '%s'? Try: %s",
+				invalidTest, strings.Join(matches, ", ")))
+		}
+	}
+
+	if len(suggestions) == 0 {
+		suggestions = append(suggestions, "💡 Available tests include: pod-to-pod-cross-node, service-clusterip, dns-resolution")
+		suggestions = append(suggestions, "💡 Available groups: networking, l3-policies, l4-policies, l7-policies")
+	}
+
+	return strings.Join(suggestions, "\n")
+}
+
+// getAvailableGroups returns a list of available test group names
+func getAvailableGroups() []string {
+	var groups []string
+	for group := range testGroups {
+		groups = append(groups, group)
+	}
+	return groups
+}
+
+// showAvailableOptions displays available test groups and examples
+func showAvailableOptions() {
+	fmt.Printf("\n📋 Available Test Groups:\n")
+	for group, tests := range testGroups {
+		fmt.Printf("  • %s (%d tests)\n", group, len(tests))
+	}
+
+	fmt.Printf("\n📋 Usage Examples:\n")
+	fmt.Printf("  • Single group: './k8s_diagnostic test l3'\n")
+	fmt.Printf("  • Multiple groups: './k8s_diagnostic test groups: l3,l4,networking'\n")
+	fmt.Printf("  • Individual tests: './k8s_diagnostic test list: dns-resolution,service-clusterip'\n")
+
+	fmt.Printf("\n📋 Popular Individual Tests:\n")
+	popularTests := []string{"pod-to-pod-cross-node", "service-clusterip", "dns-resolution", "cidr-ingress", "tcp-port-ingress"}
+	for _, test := range popularTests {
+		if entry, exists := availableTests[test]; exists {
+			fmt.Printf("  • %s (%s)\n", test, entry.Name)
+		}
+	}
+
+	fmt.Printf("\n💡 For complete help: './k8s_diagnostic test --help'\n")
 }
 
 func init() {

@@ -15,10 +15,10 @@ spec:
       - port: "443"
         protocol: TCP
       serverNames:
-      - "api.example.com"
-      - "*.api.example.com"
-      - "one.one.one.one"
-      - "dns.google"
+      - "{{API_DOMAIN}}"
+      - "{{API_SUBDOMAIN_WILDCARD}}"
+      - "{{DNS_SERVER_1}}"
+      - "{{DNS_SERVER_2}}"
     toEndpoints:
     - matchLabels:
         role: "external-apis"
@@ -29,8 +29,8 @@ spec:
       - port: "8443"
         protocol: TCP
       serverNames:
-      - "internal.example.com"
-      - "*.internal.example.com"
+      - "{{INTERNAL_DOMAIN}}"
+      - "{{INTERNAL_SUBDOMAIN_WILDCARD}}"
     toEndpoints:
     - matchLabels:
         role: "internal-services"
@@ -51,7 +51,7 @@ spec:
       - port: "9443"
         protocol: TCP
       serverNames:
-      - "secure-api.example.com"
+      - "{{SECURE_API_DOMAIN}}"
     toEndpoints:
     - matchLabels:
         app: "secure-api"

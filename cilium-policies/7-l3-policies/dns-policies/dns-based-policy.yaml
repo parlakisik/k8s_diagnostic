@@ -11,7 +11,7 @@ spec:
   egress:
   # Allow traffic to the internal cluster CIDR (like other successful L3 tests)
   - toCIDRSet:
-    - cidr: "10.0.0.0/16"
+    - cidr: "{{POD_CIDR}}"
     toPorts:
     - ports:
       - port: "80"
