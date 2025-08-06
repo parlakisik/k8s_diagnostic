@@ -1,11 +1,12 @@
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
-  name: "l7-header-rule"
+  name: "http-with-headers-policy"
 spec:
+  description: "L7 HTTP policy demonstrating method, path, and header filtering"
   endpointSelector:
     matchLabels:
-      app: myService
+      app: api
   ingress:
   - toPorts:
     - ports:
@@ -13,9 +14,30 @@ spec:
         protocol: TCP
       rules:
         http:
-        - method: GET
-          path: "/path1(/.*)?$"
-        - method: PUT
-          path: "/path2(/.*)?$"
+        # Allow GET requests to path1 (no header requirements)
+        - method: "GET"
+          path: "/path1$"
+        # Allow PUT requests to path2 but only with required header
+        - method: "PUT"
+          path: "/path2$"
           headers:
           - 'X-My-Header: true'
+        # Allow POST requests with both authentication and content type
+        - method: "POST"
+          path: "/api/.*"
+          headers:
+          - 'Authorization: Bearer .*'
+          - 'Content-Type: application/json'
+        
+        # Allow GET requests to specific API host only
+        - method: "GET"
+          path: "/api/v1/.*"
+          host: "api.example.com"
+          
+        # Allow PUT requests with host and header requirements  
+        - method: "PUT"
+          path: "/api/v2/.*"
+          host: "v2.api.example.com"
+          headers:
+          - 'Authorization: Bearer .*'
+          - 'X-API-Version: v2'

@@ -3,11 +3,12 @@ kind: CiliumNetworkPolicy
 metadata:
   name: "dns-matchpattern-policy"
 spec:
-  description: "Allow DNS queries using pattern matching with wildcards"
+  description: "L7 DNS policy allowing domain patterns using wildcard matching"
   endpointSelector:
     matchLabels:
       app: client
   egress:
+  # Allow DNS queries to DNS server
   - toEndpoints:
     - matchLabels:
         "k8s:io.kubernetes.pod.namespace": kube-system
@@ -18,19 +19,42 @@ spec:
            protocol: ANY
         rules:
           dns:
-            # Match cilium.io and all subdomains
-            - matchPattern: "*.cilium.io"
-            # Match all subdomains under api.cilium.io
-            - matchPattern: "*.api.cilium.io"
-            # Match service names with a prefix
-            - matchPattern: "special*service.api.cilium.io"
-            # Match Kubernetes internal services - both formats for maximum compatibility
-            - matchPattern: "*.*.svc.cluster.local."
-            - matchPattern: "*.*.svc.cluster.local"
-            - matchPattern: "kube-dns.kube-system.svc.cluster.local"
-            - matchPattern: "kubernetes.default.svc.cluster.local"
-            # Add commonly needed patterns for local DNS resolution
-            - matchPattern: "*.local"
-            # Wildcard alone matches all domains
-            # Use cautiously as it allows all DNS queries
+            # External domain patterns
+            - matchPattern: "*.cilium.io"          # All cilium.io subdomains
+            - matchPattern: "*.github.com"         # All github.com subdomains  
+            - matchPattern: "*.docker.io"          # All docker.io subdomains
+            - matchPattern: "*.googleapis.com"     # Google APIs
+            - matchPattern: "*.amazonaws.com"      # AWS services
+            
+            # Kubernetes service patterns (standard format)
+            - matchPattern: "*.*.svc.cluster.local"    # service.namespace.svc.cluster.local
+            - matchPattern: "*.kube-system.svc.cluster.local"  # All kube-system services
+            
+            # Development and testing patterns
+            - matchPattern: "*.local"              # Local development domains
+            - matchPattern: "test-*.example.com"   # Test environments
+            - matchPattern: "*-dev.internal"       # Development services
+            
+            # Monitoring and observability patterns
+            - matchPattern: "*.monitoring.svc.cluster.local"
+            - matchPattern: "prometheus-*.svc.cluster.local"
+            
+            # NOTE: Uncomment the next line to allow ALL DNS queries (use with caution)
             # - matchPattern: "*"
+
+  # Allow actual traffic to target pods/services after DNS resolution
+  - toEndpoints:
+    - matchLabels:
+        app: api
+    toPorts:
+    - ports:
+      - port: "80"
+        protocol: TCP
+
+  # Allow ICMP (ping) to target pods
+  - toEndpoints:
+    - matchLabels:
+        app: api
+    icmps:
+    - fields:
+      - type: 8  # ICMP Echo Request (ping)

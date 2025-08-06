@@ -349,19 +349,47 @@ install_cilium() {
         
         print_info "Cilium configured to allow Pod-to-Pod connectivity (Test 1) but break Services, DNS, and other tests"
     else
-        # Enhanced tunnel mode configuration for good cluster to ensure ALL tests pass
+        # Enhanced configuration for good cluster to ensure ALL tests pass
         print_info "Installing Cilium with proper configuration for all tests to pass..."
-        helm install cilium cilium/cilium --version 1.17.5 \
-            --namespace kube-system \
-            --set routingMode=${ROUTING_MODE} \
-            --set ipam.mode=kubernetes \
-            --set kubeProxyReplacement=true \
-            --set kubeProxyReplacementHealthzBindAddr='0.0.0.0:10256' \
-            --set externalIPs.enabled=true \
-            --set nodePort.enabled=true \
-            --set hostPort.enabled=true \
-            --set bpf.masquerade=true \
-            --set enableIPv4Masquerade=true
+        
+        # Create proper configuration based on routing mode
+        if [[ "$ROUTING_MODE" == "tunnel" ]]; then
+            print_info "Using tunnel mode configuration..."
+            helm install cilium cilium/cilium --version 1.17.5 \
+                --namespace kube-system \
+                --set routingMode=tunnel \
+                --set ipam.mode=kubernetes \
+                --set kubeProxyReplacement=true \
+                --set kubeProxyReplacementHealthzBindAddr='127.0.0.1:9879' \
+                --set externalIPs.enabled=true \
+                --set nodePort.enabled=true \
+                --set hostPort.enabled=true \
+                --set bpf.masquerade=true \
+                --set enableIPv4Masquerade=true
+        elif [[ "$ROUTING_MODE" == "native" ]]; then
+            print_info "Using native mode configuration..."
+            helm install cilium cilium/cilium --version 1.17.5 \
+                --namespace kube-system \
+                --set routingMode=native \
+                --set ipam.mode=kubernetes \
+                --set kubeProxyReplacement=true \
+                --set kubeProxyReplacementHealthzBindAddr='127.0.0.1:9879' \
+                --set ipv4NativeRoutingCIDR="10.244.0.0/16" \
+                --set autoDirectNodeRoutes=true \
+                --set enableIPv4Masquerade=true \
+                --set externalIPs.enabled=true \
+                --set nodePort.enabled=true \
+                --set hostPort.enabled=true \
+                --set bpf.masquerade=true
+        else
+            # Fallback minimal configuration
+            print_info "Using minimal failsafe configuration..."
+            helm install cilium cilium/cilium --version 1.17.5 \
+                --namespace kube-system \
+                --set routingMode=tunnel \
+                --set ipam.mode=kubernetes \
+                --set kubeProxyReplacement=false
+        fi
     fi
     
     print_info "Waiting for Cilium to be ready..."

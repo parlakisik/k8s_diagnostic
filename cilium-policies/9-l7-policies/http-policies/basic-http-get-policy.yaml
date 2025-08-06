@@ -1,12 +1,12 @@
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
-  name: "allow-http-get-public"
+  name: "basic-http-get-policy"
 spec:
-  description: "Allow HTTP GET /public from env=prod to app=service"
+  description: "L7 HTTP policy allowing only GET requests to /public endpoint"
   endpointSelector:
     matchLabels:
-      app: service
+      app: api
   ingress:
   - fromEndpoints:
     - matchLabels:
@@ -17,5 +17,14 @@ spec:
         protocol: TCP
       rules:
         http:
+        # Allow GET requests to the /public path only
         - method: "GET"
-          path: "/public"
+          path: "/public$"
+        
+        # Also allow GET to health check endpoint  
+        - method: "GET"
+          path: "/health$"
+        
+        # Allow GET to static assets
+        - method: "GET"
+          path: "/static/.*"

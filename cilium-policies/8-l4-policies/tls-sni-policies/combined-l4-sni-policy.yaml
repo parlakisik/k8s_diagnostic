@@ -45,20 +45,13 @@ spec:
     - matchLabels:
         app: "web-server"
         
-  # Allow access to specific API via non-standard port with SNI
+  # Allow access to specific API via non-standard port with SNI (TLS filtering only)
   - toPorts:
     - ports:
       - port: "9443"
         protocol: TCP
       serverNames:
       - "secure-api.example.com"
-      # Additional L7 HTTP filtering on top of SNI
-      rules:
-        http:
-        - method: "GET"
-          path: "/api/v1/public.*"
-        - method: "GET"
-          path: "/health"
     toEndpoints:
     - matchLabels:
         app: "secure-api"
