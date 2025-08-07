@@ -1,13 +1,15 @@
+# Project binaries - DO NOT COMMIT
+k8s-diagnostic
+k8s_diagnostic
+/k8s-diagnostic
+/k8s_diagnostic
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-k8s-diagnostic
-k8s_diagnostic
-/k8s-diagnostic
-/k8s_diagnostic
 
 # Test binary, built with `go test -c`
 *.test
