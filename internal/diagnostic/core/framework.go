@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PolicyTestConfig defines configuration for a single policy test
@@ -73,14 +75,32 @@ func ExecutePolicyTest(
 	testCtx, cancel := context.WithTimeout(freshCtx, 3*time.Minute)
 	defer cancel()
 
-	// Ensure policy cleanup after test completion - use fresh context for cleanup too
+	// Enhanced cleanup system with security policy handling
 	defer func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 60*time.Second) // Extended timeout
 		defer cleanupCancel()
-		if err := t.CleanupNetworkPolicy(cleanupCtx, policyName, config.PolicyPath); err != nil {
-			logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+
+		// Simple status message for cleanup start
+		logger.LogSimpleStatus(fmt.Sprintf("in between test cleanup started"))
+
+		// Enhanced cleanup for security policies (global scope policies)
+		if config.SubgroupId == "security" {
+			if err := performEnhancedSecurityPolicyCleanup(cleanupCtx, t, policyName, config, logger); err != nil {
+				logger.LogError("Enhanced security policy cleanup failed for %s: %v", policyName, err)
+			}
+		} else {
+			// Standard cleanup for other policies
+			if err := t.CleanupNetworkPolicy(cleanupCtx, policyName, config.PolicyPath); err != nil {
+				logger.LogError("Failed to cleanup policy %s: %v", policyName, err)
+			}
 		}
+
+		// Simple status message for cleanup completion
+		logger.LogSimpleStatus(fmt.Sprintf("in between test cleanup finished"))
 	}()
+
+	// Simple status message for test start
+	logger.LogSimpleStatus(fmt.Sprintf("test started: %s", config.TestId))
 
 	// Start test with structured logging (suppress verbose headers in hierarchical mode)
 	if verbose {
@@ -147,6 +167,16 @@ func ExecutePolicyTest(
 		hierarchy,
 		&result, // Pass complete TestResult - CRITICAL for error details, diagnostics, and failure information
 	)
+
+	// Simple status message for test completion
+	logger.LogSimpleStatus(fmt.Sprintf("test finished: %s", config.TestId))
+
+	// Simple status message for test result
+	if result.Success {
+		logger.LogSimpleStatus(fmt.Sprintf("test PASSED: %s", config.TestId))
+	} else {
+		logger.LogSimpleStatus(fmt.Sprintf("test FAILED: %s", config.TestId))
+	}
 
 	return result
 }
@@ -236,6 +266,13 @@ func ExecuteNetworkingTest(
 		hierarchy,
 		&result, // Pass complete TestResult - CRITICAL for networking error details, diagnostics, and failure information
 	)
+
+	// Simple status message for test result (consistent with policy tests)
+	if result.Success {
+		logger.LogSimpleStatus(fmt.Sprintf("test PASSED: %s", config.TestId))
+	} else {
+		logger.LogSimpleStatus(fmt.Sprintf("test FAILED: %s", config.TestId))
+	}
 
 	// Return the basic result for backward compatibility
 	// The enhanced result will be used by FormatEnhancedTestSummary
@@ -790,12 +827,80 @@ func evaluateHTTPStatusCode(statusCode string) (bool, string) {
 	}
 }
 
+// performEnhancedSecurityPolicyCleanup performs enhanced cleanup for security policies with validation
+func performEnhancedSecurityPolicyCleanup(ctx context.Context, t *Tester, policyName string, config PolicyTestConfig, logger *MultiChannelLogger) error {
+	logger.LogInfo("Enhanced security policy cleanup starting for: %s", policyName)
+
+	// Step 1: Standard policy cleanup
+	if err := t.CleanupNetworkPolicy(ctx, policyName, config.PolicyPath); err != nil {
+		logger.LogError("Standard cleanup failed for policy %s: %v", policyName, err)
+		// Continue with enhanced cleanup even if standard fails
+	}
+
+	// Step 2: Force cleanup of ClusterwideNetworkPolicy (security policies are typically clusterwide)
+	executor := NewCommandExecutor(logger, "diagnostic-test", false)
+	_, err := executor.ExecuteKubectlCommand(ctx, "delete", "ciliumclusterwidenetworkpolicy", policyName, "--ignore-not-found=true")
+	if err != nil {
+		logger.LogError("Force cleanup of CiliumClusterwideNetworkPolicy %s failed: %v", policyName, err)
+	}
+
+	// Step 3: Validate policy is completely removed
+	time.Sleep(2 * time.Second) // Brief wait for policy propagation
+
+	// Check if policy still exists
+	output, err := executor.ExecuteKubectlCommand(ctx, "get", "ciliumclusterwidenetworkpolicy", policyName, "--ignore-not-found=true")
+	if err == nil && len(strings.TrimSpace(output)) > 0 {
+		logger.LogError("Policy %s still exists after cleanup attempt", policyName)
+
+		// Emergency force delete with finalizer removal
+		_, _ = executor.ExecuteKubectlCommand(ctx, "patch", "ciliumclusterwidenetworkpolicy", policyName,
+			"--type=merge", "-p", `{"metadata":{"finalizers":null}}`, "--ignore-not-found=true")
+		_, _ = executor.ExecuteKubectlCommand(ctx, "delete", "ciliumclusterwidenetworkpolicy", policyName,
+			"--force", "--grace-period=0", "--ignore-not-found=true")
+	}
+
+	// Step 4: Security policy cooling-off period (essential for global policies)
+	logger.LogInfo("Security policy cleanup cooling-off period for: %s", policyName)
+	time.Sleep(3 * time.Second) // Extended cooling-off for security policies
+
+	// Step 5: Validate cluster state is clean
+	if err := validateClusterSecurityState(ctx, executor, logger); err != nil {
+		logger.LogError("Cluster security state validation failed: %v", err)
+		return err
+	}
+
+	logger.LogInfo("Enhanced security policy cleanup completed for: %s", policyName)
+	return nil
+}
+
+// validateClusterSecurityState ensures no lingering security policies exist
+func validateClusterSecurityState(ctx context.Context, executor *CommandExecutor, logger *MultiChannelLogger) error {
+	// Check for any remaining security-related policies
+	output, err := executor.ExecuteKubectlCommand(ctx, "get", "ciliumclusterwidenetworkpolicy", "-o", "name", "--ignore-not-found=true")
+	if err != nil {
+		return fmt.Errorf("failed to check cluster policy state: %v", err)
+	}
+
+	// Filter out non-security policies (if any remain)
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	securityPolicies := []string{}
+	for _, line := range lines {
+		if line != "" && (strings.Contains(line, "allow-all") || strings.Contains(line, "deny-all")) {
+			securityPolicies = append(securityPolicies, strings.TrimPrefix(line, "ciliumclusterwidenetworkpolicy.cilium.io/"))
+		}
+	}
+
+	if len(securityPolicies) > 0 {
+		logger.LogError("Found lingering security policies: %v", securityPolicies)
+		return fmt.Errorf("cluster not in clean state - found policies: %v", securityPolicies)
+	}
+
+	return nil
+}
+
 // performNetworkingEmergencyCleanup performs comprehensive cleanup of networking resources
 func performNetworkingEmergencyCleanup(ctx context.Context, config PolicyTestConfig, logger *MultiChannelLogger, t *Tester) {
-	logger.LogInfo("Emergency cleanup: Starting networking resource cleanup for test %s", config.TestId)
-
 	if config.NetworkingConfig == nil || config.NetworkingConfig.ResourceNames == nil {
-		logger.LogInfo("Emergency cleanup: No resource names to cleanup")
 		return
 	}
 
@@ -805,17 +910,14 @@ func performNetworkingEmergencyCleanup(ctx context.Context, config PolicyTestCon
 	// 1. Pod cleanup - most critical
 	if pod1Name, exists := resourceNames["pod1"]; exists && pod1Name != "" {
 		t.CleanupPod(ctx, pod1Name)
-		logger.LogInfo("Emergency cleanup: Cleaned up pod %s", pod1Name)
 	}
 
 	if pod2Name, exists := resourceNames["pod2"]; exists && pod2Name != "" {
 		t.CleanupPod(ctx, pod2Name)
-		logger.LogInfo("Emergency cleanup: Cleaned up pod %s", pod2Name)
 	}
 
 	if testPodName, exists := resourceNames["testpod"]; exists && testPodName != "" {
 		t.CleanupPod(ctx, testPodName)
-		logger.LogInfo("Emergency cleanup: Cleaned up testpod %s", testPodName)
 	}
 
 	// 2. Service cleanup
@@ -824,8 +926,6 @@ func performNetworkingEmergencyCleanup(ctx context.Context, config PolicyTestCon
 		_, err := executor.ExecuteKubectlCommand(ctx, "delete", "service", serviceName, "--ignore-not-found=true")
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("service %s: %v", serviceName, err))
-		} else {
-			logger.LogInfo("Emergency cleanup: Successfully cleaned up service %s", serviceName)
 		}
 	}
 
@@ -835,8 +935,6 @@ func performNetworkingEmergencyCleanup(ctx context.Context, config PolicyTestCon
 		_, err := executor.ExecuteKubectlCommand(ctx, "delete", "deployment", deploymentName, "--ignore-not-found=true")
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("deployment %s: %v", deploymentName, err))
-		} else {
-			logger.LogInfo("Emergency cleanup: Successfully cleaned up deployment %s", deploymentName)
 		}
 	}
 
@@ -846,17 +944,519 @@ func performNetworkingEmergencyCleanup(ctx context.Context, config PolicyTestCon
 		_, err := executor.ExecuteKubectlCommand(ctx, "delete", "pod", "--ignore-not-found=true", "-l", "app=dns-test")
 		if err != nil {
 			cleanupErrors = append(cleanupErrors, fmt.Sprintf("DNS test pods: %v", err))
-		} else {
-			logger.LogInfo("Emergency cleanup: Successfully cleaned up DNS test pods")
 		}
 	}
 
-	// 5. Final summary
-	if len(cleanupErrors) == 0 {
-		logger.LogInfo("Emergency cleanup: All networking resources cleaned up successfully for test %s", config.TestId)
-	} else {
+	// Only log errors if any occurred
+	if len(cleanupErrors) > 0 {
 		logger.LogError("Emergency cleanup: Some resources failed to cleanup for test %s: %s", config.TestId, strings.Join(cleanupErrors, ", "))
 	}
+}
+
+// =============================================================================
+// REUSABLE VALIDATION PATTERNS FOR COMMON TEST SCENARIOS
+// =============================================================================
+
+// ValidateWorkerNodes validates that the cluster has sufficient worker nodes for a test
+func ValidateWorkerNodes(ctx context.Context, t *Tester, minNodes int, collector *TestDataCollector, generator *UserMessageGenerator) (*EnvironmentValidationResult, error) {
+	startTime := time.Now()
+
+	workerNodes, err := t.GetWorkerNodes(ctx)
+	if err != nil {
+		userMsg := generator.AnalyzeEnvironmentFailure(err)
+		// Use HTTP API if available, fallback to regular logger
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"error": err.Error()})
+
+		return &EnvironmentValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"error": err.Error(), "minNodesRequired": minNodes},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "environment",
+				ComponentName:  "worker-nodes",
+				ValidationType: "node-count",
+			},
+		}, err
+	}
+
+	nodeCount := len(workerNodes)
+
+	if nodeCount < minNodes {
+		userMsg := UserMessage{
+			Phase:       "environment",
+			Status:      "failure",
+			Title:       "Insufficient worker nodes",
+			Description: fmt.Sprintf("Found only %d nodes - this test requires at least %d worker nodes", nodeCount, minNodes),
+			Context:     "Cannot validate distributed workload capability",
+			Hints: []string{
+				"Add more worker nodes to your cluster",
+				fmt.Sprintf("Consider using tests that require fewer than %d nodes", minNodes),
+				"Check your cluster scaling configuration",
+			},
+		}
+		// Use HTTP API if available, fallback to regular logger
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"foundNodes": nodeCount, "requiredNodes": minNodes})
+
+		return &EnvironmentValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"foundNodes": nodeCount, "requiredNodes": minNodes, "nodeNames": workerNodes},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "environment",
+				ComponentName:  "worker-nodes",
+				ValidationType: "node-count",
+			},
+			NodeCount: nodeCount,
+		}, fmt.Errorf("insufficient worker nodes: need %d, found %d", minNodes, nodeCount)
+	}
+
+	// Success case
+	envMsg := generator.AnalyzeEnvironmentForNetworking()
+	// Use HTTP API if available, fallback to regular logger
+	collector.LogUserStepHTTP(envMsg.Phase, envMsg.Status, envMsg.Title, envMsg.Description, envMsg.Context, envMsg.Hints, map[string]interface{}{"nodeCount": nodeCount, "nodeNames": workerNodes})
+
+	return &EnvironmentValidationResult{
+		ValidationResult: ValidationResult{
+			Success:        true,
+			UserMessage:    envMsg,
+			TechnicalData:  map[string]interface{}{"foundNodes": nodeCount, "requiredNodes": minNodes, "nodeNames": workerNodes},
+			FailureHints:   []string{},
+			Duration:       time.Since(startTime).Seconds(),
+			ComponentType:  "environment",
+			ComponentName:  "worker-nodes",
+			ValidationType: "node-count",
+		},
+		NodeCount: nodeCount,
+	}, nil
+}
+
+// ValidateClusterConnectivity validates basic cluster connectivity and permissions
+func ValidateClusterConnectivity(ctx context.Context, t *Tester, collector *TestDataCollector, generator *UserMessageGenerator) (*EnvironmentValidationResult, error) {
+	startTime := time.Now()
+
+	// Test basic kubectl access
+	_, err := t.GetClientset().CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		userMsg := generator.AnalyzeEnvironmentFailure(err)
+		// Use HTTP API if available, fallback to regular logger
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"error": err.Error()})
+
+		return &EnvironmentValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"error": err.Error(), "operation": "cluster-access"},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "environment",
+				ComponentName:  "cluster-access",
+				ValidationType: "connectivity",
+			},
+		}, err
+	}
+
+	// Success - cluster is accessible
+	userMsg := UserMessage{
+		Phase:       "environment",
+		Status:      "success",
+		Title:       "Cluster connectivity verified",
+		Description: "Successfully connected to Kubernetes cluster",
+		Context:     "Your cluster is accessible and ready for testing",
+		Hints:       []string{"Cluster permissions verified", "Ready to proceed with tests"},
+	}
+	// Use HTTP API if available, fallback to regular logger
+	collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"operation": "cluster-access"})
+
+	return &EnvironmentValidationResult{
+		ValidationResult: ValidationResult{
+			Success:        true,
+			UserMessage:    userMsg,
+			TechnicalData:  map[string]interface{}{"operation": "cluster-access", "verified": true},
+			FailureHints:   []string{},
+			Duration:       time.Since(startTime).Seconds(),
+			ComponentType:  "environment",
+			ComponentName:  "cluster-access",
+			ValidationType: "connectivity",
+		},
+	}, nil
+}
+
+// ValidateCNIHealth checks the health of the CNI provider
+func ValidateCNIHealth(ctx context.Context, t *Tester, collector *TestDataCollector, generator *UserMessageGenerator) (*EnvironmentValidationResult, error) {
+	startTime := time.Now()
+
+	// Try to get CNI configuration from Cilium config map
+	cniProvider := "unknown"
+	cniVersion := ""
+
+	ciliumConfig, err := t.getCiliumConfig(ctx)
+	if err == nil {
+		cniProvider = "cilium"
+		// Try to get version info from config
+		if ver, exists := ciliumConfig["cilium-version"]; exists {
+			cniVersion = ver
+		}
+	} else {
+		// Fallback: check for other CNI providers via node info
+		nodes, nodeErr := t.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+		if nodeErr == nil && len(nodes.Items) > 0 {
+			// Check node annotations for CNI hints
+			node := nodes.Items[0]
+			if _, exists := node.Annotations["projectcalico.org/IPv4Address"]; exists {
+				cniProvider = "calico"
+			} else if _, exists := node.Annotations["flannel.alpha.coreos.com/public-ip"]; exists {
+				cniProvider = "flannel"
+			}
+		}
+	}
+
+	if cniProvider == "unknown" {
+		userMsg := UserMessage{
+			Phase:       "environment",
+			Status:      "warning",
+			Title:       "CNI provider not detected",
+			Description: "Could not determine CNI provider type",
+			Context:     "Network testing will proceed with basic assumptions",
+			Hints:       []string{"Verify CNI installation", "Check cluster network configuration"},
+		}
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"cniProvider": cniProvider})
+
+		return &EnvironmentValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        true, // Warning, not failure
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"cniProvider": cniProvider, "status": "unknown"},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "environment",
+				ComponentName:  "cni-health",
+				ValidationType: "infrastructure",
+			},
+			CNIProvider: cniProvider,
+		}, nil
+	}
+
+	// Success - CNI detected
+	userMsg := UserMessage{
+		Phase:       "environment",
+		Status:      "success",
+		Title:       fmt.Sprintf("%s CNI detected and ready", strings.Title(cniProvider)),
+		Description: fmt.Sprintf("Cluster is using %s CNI for networking", cniProvider),
+		Context:     "Network testing can proceed with CNI-specific optimizations",
+		Hints:       []string{fmt.Sprintf("%s CNI provider verified", strings.Title(cniProvider))},
+	}
+	collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"cniProvider": cniProvider, "cniVersion": cniVersion})
+
+	return &EnvironmentValidationResult{
+		ValidationResult: ValidationResult{
+			Success:        true,
+			UserMessage:    userMsg,
+			TechnicalData:  map[string]interface{}{"cniProvider": cniProvider, "cniVersion": cniVersion, "status": "healthy"},
+			FailureHints:   []string{},
+			Duration:       time.Since(startTime).Seconds(),
+			ComponentType:  "environment",
+			ComponentName:  "cni-health",
+			ValidationType: "infrastructure",
+		},
+		CNIProvider: cniProvider,
+		CNIVersion:  cniVersion,
+	}, nil
+}
+
+// ValidateAndCreatePod creates a pod with comprehensive validation and data collection
+func ValidateAndCreatePod(ctx context.Context, t *Tester, podName, nodeName string, collector *TestDataCollector, generator *UserMessageGenerator) (*ResourceValidationResult, error) {
+	startTime := time.Now()
+
+	// Record pod creation in collector
+	collector.RecordPodCreation(podName, nodeName)
+
+	// Create the pod using tester
+	pod, err := t.CreateNetshootPod(ctx, podName, nodeName)
+	if err != nil {
+		collector.UpdatePodStatus(podName, "failed", "", "", err.Error())
+		userMsg := generator.AnalyzePodFailure(err)
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"podName": podName, "error": err.Error()})
+
+		return &ResourceValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"podName": podName, "requestedNode": nodeName, "error": err.Error()},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "resource",
+				ComponentName:  "pod",
+				ValidationType: "creation",
+			},
+			ResourceName:   podName,
+			ResourceType:   "pod",
+			ResourceStatus: "failed",
+			CreationTime:   startTime,
+			RequestedNode:  nodeName,
+			Error:          err.Error(),
+		}, err
+	}
+
+	// Wait for pod to be ready
+	err = t.WaitForPodReady(ctx, podName, 120*time.Second)
+	readyTime := time.Now()
+
+	if err != nil {
+		collector.UpdatePodStatus(podName, "timeout", nodeName, "", err.Error())
+		userMsg := UserMessage{
+			Phase:       "setup",
+			Status:      "failure",
+			Title:       "Pod readiness timeout",
+			Description: "Pod was created but did not become ready within timeout",
+			Context:     "Resource scheduling or container startup issue",
+			Hints: []string{
+				"Check pod events and logs",
+				"Verify node resources and constraints",
+				"Check container image availability",
+			},
+		}
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"podName": podName, "timeout": "120s"})
+
+		return &ResourceValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"podName": podName, "requestedNode": nodeName, "status": "timeout", "error": err.Error()},
+				FailureHints:   userMsg.Hints,
+				Duration:       time.Since(startTime).Seconds(),
+				ComponentType:  "resource",
+				ComponentName:  "pod",
+				ValidationType: "readiness",
+			},
+			ResourceName:   podName,
+			ResourceType:   "pod",
+			ResourceStatus: "timeout",
+			CreationTime:   startTime,
+			RequestedNode:  nodeName,
+			Error:          err.Error(),
+		}, err
+	}
+
+	// Success - pod is ready
+	actualNode := pod.Spec.NodeName
+	podIP := pod.Status.PodIP
+
+	collector.UpdatePodStatus(podName, "running", actualNode, podIP, "")
+
+	userMsg := UserMessage{
+		Phase:       "setup",
+		Status:      "success",
+		Title:       "Pod created successfully",
+		Description: fmt.Sprintf("Pod %s is running on node %s", podName, actualNode),
+		Context:     "Resource is ready for testing",
+		Hints:       []string{fmt.Sprintf("Pod IP: %s", podIP), "Pod is healthy and responsive"},
+	}
+	collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"podName": podName, "podIP": podIP, "actualNode": actualNode})
+
+	return &ResourceValidationResult{
+		ValidationResult: ValidationResult{
+			Success:        true,
+			UserMessage:    userMsg,
+			TechnicalData:  map[string]interface{}{"podName": podName, "podIP": podIP, "actualNode": actualNode, "requestedNode": nodeName},
+			FailureHints:   []string{},
+			Duration:       time.Since(startTime).Seconds(),
+			ComponentType:  "resource",
+			ComponentName:  "pod",
+			ValidationType: "creation",
+		},
+		ResourceName:   podName,
+		ResourceType:   "pod",
+		ResourceStatus: "running",
+		CreationTime:   startTime,
+		ReadyTime:      &readyTime,
+		RequestedNode:  nodeName,
+		ActualNode:     actualNode,
+		ResourceIP:     podIP,
+	}, nil
+}
+
+// ValidateHTTPConnectivity tests HTTP connectivity with intelligent failure analysis
+func ValidateHTTPConnectivity(ctx context.Context, t *Tester, sourcePod, target string, collector *TestDataCollector, generator *UserMessageGenerator) (*ConnectivityValidationResult, error) {
+	startTime := time.Now()
+
+	// Record connectivity test in collector
+	connectivityTest := collector.RecordConnectivityTest(sourcePod, target, "http")
+
+	// Execute HTTP connectivity test
+	statusCode, err := t.TestHTTPConnectivityWithStatusCode(ctx, sourcePod, target)
+	duration := time.Since(startTime).Seconds()
+
+	if err != nil {
+		collector.UpdateConnectivityResult(connectivityTest, false, "", "", err.Error())
+		userMsg := generator.AnalyzeConnectivityFailure(err, "http")
+		collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"sourcePod": sourcePod, "target": target, "error": err.Error()})
+
+		return &ConnectivityValidationResult{
+			ValidationResult: ValidationResult{
+				Success:        false,
+				UserMessage:    userMsg,
+				TechnicalData:  map[string]interface{}{"sourcePod": sourcePod, "target": target, "error": err.Error(), "testType": "http"},
+				FailureHints:   userMsg.Hints,
+				Duration:       duration,
+				ComponentType:  "connectivity",
+				ComponentName:  "http-connectivity",
+				ValidationType: "http-test",
+			},
+			SourcePod:    sourcePod,
+			TargetPod:    target,
+			TestType:     "http",
+			StatusCode:   "",
+			ResponseTime: duration,
+		}, err
+	}
+
+	// Evaluate HTTP status code
+	success, _ := evaluateHTTPStatusCode(statusCode)
+	collector.UpdateConnectivityResult(connectivityTest, success, statusCode, "", "")
+
+	var userMsg UserMessage
+	if success {
+		userMsg = UserMessage{
+			Phase:       "execution",
+			Status:      "success",
+			Title:       "HTTP connectivity successful",
+			Description: fmt.Sprintf("Successfully connected from %s to %s", sourcePod, target),
+			Context:     "Network communication is working correctly",
+			Hints:       []string{fmt.Sprintf("HTTP status: %s", statusCode), "Network policies allow this connection"},
+		}
+	} else {
+		userMsg = UserMessage{
+			Phase:       "execution",
+			Status:      "failure",
+			Title:       "HTTP connectivity blocked",
+			Description: fmt.Sprintf("Connection from %s to %s returned %s", sourcePod, target, statusCode),
+			Context:     "Network policies or configuration may be blocking communication",
+			Hints: []string{
+				"Check network policies in the namespace",
+				"Verify target service is running and accessible",
+				"Review firewall rules between nodes",
+			},
+		}
+	}
+
+	collector.LogUserStepHTTP(userMsg.Phase, userMsg.Status, userMsg.Title, userMsg.Description, userMsg.Context, userMsg.Hints, map[string]interface{}{"sourcePod": sourcePod, "target": target, "statusCode": statusCode})
+
+	return &ConnectivityValidationResult{
+		ValidationResult: ValidationResult{
+			Success:        success,
+			UserMessage:    userMsg,
+			TechnicalData:  map[string]interface{}{"sourcePod": sourcePod, "target": target, "statusCode": statusCode, "testType": "http"},
+			FailureHints:   userMsg.Hints,
+			Duration:       duration,
+			ComponentType:  "connectivity",
+			ComponentName:  "http-connectivity",
+			ValidationType: "http-test",
+		},
+		SourcePod:    sourcePod,
+		TargetPod:    target,
+		TestType:     "http",
+		StatusCode:   statusCode,
+		ResponseTime: duration,
+	}, nil
+}
+
+// =============================================================================
+// REUSABLE TEST EXECUTION PATTERNS
+// =============================================================================
+
+// ExecuteBasicConnectivityTest handles basic pod-to-pod connectivity testing with reusable validation
+func ExecuteBasicConnectivityTest(config PolicyTestConfig, logger *MultiChannelLogger, t *Tester, ctx context.Context) TestResult {
+	// Create smart components with minimal infrastructure info
+	infrastructure := &ClusterInfrastructure{
+		CNIProvider: "unknown", // Will be detected dynamically
+		Platform:    "kubernetes",
+	}
+	// Create collector without frontend logger for now (will be handled by the main logging system)
+	collector := NewTestDataCollector(config.TestId, config.GroupId, nil, infrastructure)
+	generator := NewUserMessageGenerator(config.GroupId, infrastructure)
+
+	// 1. Environment validation
+	nodeValidation, err := ValidateWorkerNodes(ctx, t, 1, collector, generator)
+	if err != nil || !nodeValidation.Success {
+		return TestResult{Success: false, Message: nodeValidation.UserMessage.Description}
+	}
+
+	// 2. Create test pods with validation
+	resourceNames := generateResourceNames(config.TestId)
+	pod1Result, err := ValidateAndCreatePod(ctx, t, resourceNames["pod1"], "", collector, generator)
+	if err != nil || !pod1Result.Success {
+		return TestResult{Success: false, Message: pod1Result.UserMessage.Description}
+	}
+
+	pod2Result, err := ValidateAndCreatePod(ctx, t, resourceNames["pod2"], "", collector, generator)
+	if err != nil || !pod2Result.Success {
+		t.CleanupPod(ctx, resourceNames["pod1"])
+		return TestResult{Success: false, Message: pod2Result.UserMessage.Description}
+	}
+
+	// 3. Test connectivity with validation
+	connectivityResult, err := ValidateHTTPConnectivity(ctx, t, resourceNames["pod1"], resourceNames["pod2"], collector, generator)
+
+	// 4. Cleanup
+	t.CleanupPod(ctx, resourceNames["pod1"])
+	t.CleanupPod(ctx, resourceNames["pod2"])
+
+	if err != nil || !connectivityResult.Success {
+		return TestResult{Success: false, Message: connectivityResult.UserMessage.Description}
+	}
+
+	return TestResult{Success: true, Message: "Basic connectivity test passed - pod-to-pod communication working"}
+}
+
+// ExecuteCrossNodeTest handles cross-node connectivity testing with reusable validation
+func ExecuteCrossNodeTest(config PolicyTestConfig, logger *MultiChannelLogger, t *Tester, ctx context.Context) TestResult {
+	// Create smart components with minimal infrastructure info
+	infrastructure := &ClusterInfrastructure{
+		CNIProvider: "unknown", // Will be detected dynamically
+		Platform:    "kubernetes",
+	}
+	// Create collector without frontend logger for now (will be handled by the main logging system)
+	collector := NewTestDataCollector(config.TestId, config.GroupId, nil, infrastructure)
+	generator := NewUserMessageGenerator(config.GroupId, infrastructure)
+
+	// 1. Validate environment (requires 2+ nodes for cross-node)
+	nodeValidation, err := ValidateWorkerNodes(ctx, t, 2, collector, generator)
+	if err != nil || !nodeValidation.Success {
+		return TestResult{Success: false, Message: nodeValidation.UserMessage.Description}
+	}
+
+	// Get worker nodes for placement
+	workerNodes, _ := t.GetWorkerNodes(ctx)
+
+	// 2. Create pods on different nodes
+	resourceNames := generateResourceNames(config.TestId)
+	pod1Result, err := ValidateAndCreatePod(ctx, t, resourceNames["pod1"], workerNodes[0], collector, generator)
+	if err != nil || !pod1Result.Success {
+		return TestResult{Success: false, Message: pod1Result.UserMessage.Description}
+	}
+
+	pod2Result, err := ValidateAndCreatePod(ctx, t, resourceNames["pod2"], workerNodes[1], collector, generator)
+	if err != nil || !pod2Result.Success {
+		t.CleanupPod(ctx, resourceNames["pod1"])
+		return TestResult{Success: false, Message: pod2Result.UserMessage.Description}
+	}
+
+	// 3. Test cross-node connectivity
+	connectivityResult, err := ValidateHTTPConnectivity(ctx, t, resourceNames["pod1"], resourceNames["pod2"], collector, generator)
+
+	// 4. Cleanup
+	t.CleanupPod(ctx, resourceNames["pod1"])
+	t.CleanupPod(ctx, resourceNames["pod2"])
+
+	if err != nil || !connectivityResult.Success {
+		return TestResult{Success: false, Message: connectivityResult.UserMessage.Description}
+	}
+
+	return TestResult{Success: true, Message: "Cross-node connectivity test passed - distributed networking working"}
 }
 
 // Networking test execution will be handled by the networking package implementations

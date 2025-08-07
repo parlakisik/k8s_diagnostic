@@ -57,6 +57,19 @@ build/
 # EKS-A testing files
 eks-a-policy-tests/
 
+# Node.js dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
 # Demo script
 demo_clusters.sh
 basic-network-test.sh
+
+# Next.js build artifacts and development files
+web/.next/

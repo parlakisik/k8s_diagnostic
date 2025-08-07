@@ -171,3 +171,232 @@ type VerboseTestSummary struct {
 	FailurePoint string
 	ErrorDetails *VerboseErrorDetails
 }
+
+// =============================================================================
+// ENHANCED DATA STRUCTURES FOR COMPREHENSIVE TEST DIAGNOSTICS AND USER FEEDBACK
+// =============================================================================
+
+// DetailedTestResult extends TestResult with comprehensive environment and execution data
+type DetailedTestResult struct {
+	TestResult
+	EnvironmentSnapshot *EnvironmentSnapshot `json:"environment_snapshot,omitempty"`
+	ExecutionData       *TestExecutionData   `json:"execution_data,omitempty"`
+	UserContext         *UserTestContext     `json:"user_context,omitempty"`
+}
+
+// EnvironmentSnapshot captures the cluster state at test execution time
+type EnvironmentSnapshot struct {
+	Infrastructure *ClusterInfrastructure `json:"infrastructure"`
+	TestNamespace  string                 `json:"test_namespace"`
+	StartTime      time.Time              `json:"start_time"`
+	NodeStates     []NodeState            `json:"node_states,omitempty"`
+	CNIHealth      CNIHealthSnapshot      `json:"cni_health"`
+}
+
+// NodeState represents the state of a single node during test execution
+type NodeState struct {
+	Name               string            `json:"name"`
+	Ready              bool              `json:"ready"`
+	SchedulingDisabled bool              `json:"scheduling_disabled"`
+	PodCount           int               `json:"pod_count"`
+	PodCapacity        int               `json:"pod_capacity"`
+	Labels             map[string]string `json:"labels,omitempty"`
+	Taints             []string          `json:"taints,omitempty"`
+}
+
+// CNIHealthSnapshot captures CNI status at test time
+type CNIHealthSnapshot struct {
+	Provider           string `json:"provider"`
+	Version            string `json:"version,omitempty"`
+	PodsRunning        int    `json:"pods_running"`
+	PodsTotal          int    `json:"pods_total"`
+	ConnectivityCheck  string `json:"connectivity_check"` // "healthy", "unhealthy", "unknown"
+	HealthCheckDetails string `json:"health_check_details,omitempty"`
+}
+
+// TestExecutionData tracks all runtime test execution details
+type TestExecutionData struct {
+	PodsCreated       []PodCreationResult       `json:"pods_created"`
+	ServicesCreated   []ServiceCreationResult   `json:"services_created"`
+	PoliciesApplied   []PolicyApplicationResult `json:"policies_applied,omitempty"`
+	ConnectivityTests []ConnectivityTestResult  `json:"connectivity_tests"`
+	FailurePoints     []FailurePoint            `json:"failure_points,omitempty"`
+	CleanupResults    CleanupResult             `json:"cleanup_results"`
+}
+
+// PodCreationResult tracks individual pod deployment with detailed status
+type PodCreationResult struct {
+	PodName       string     `json:"pod_name"`
+	RequestedNode string     `json:"requested_node,omitempty"`
+	ActualNode    string     `json:"actual_node"`
+	PodIP         string     `json:"pod_ip,omitempty"`
+	Status        string     `json:"status"` // "created", "failed", "pending", "running", "timeout"
+	CreationTime  time.Time  `json:"creation_time"`
+	ReadyTime     *time.Time `json:"ready_time,omitempty"`
+	Error         string     `json:"error,omitempty"`
+	RestartCount  int        `json:"restart_count"`
+	Image         string     `json:"image,omitempty"`
+	Resources     string     `json:"resources,omitempty"`
+}
+
+// ServiceCreationResult tracks service deployment and accessibility
+type ServiceCreationResult struct {
+	ServiceName  string     `json:"service_name"`
+	ServiceType  string     `json:"service_type"` // "ClusterIP", "NodePort", "LoadBalancer"
+	ClusterIP    string     `json:"cluster_ip,omitempty"`
+	ExternalIP   string     `json:"external_ip,omitempty"`
+	NodePort     int        `json:"node_port,omitempty"`
+	Ports        []string   `json:"ports"`
+	Status       string     `json:"status"` // "created", "failed", "ready"
+	CreationTime time.Time  `json:"creation_time"`
+	ReadyTime    *time.Time `json:"ready_time,omitempty"`
+	Error        string     `json:"error,omitempty"`
+}
+
+// PolicyApplicationResult tracks network policy deployment and status
+type PolicyApplicationResult struct {
+	PolicyName     string     `json:"policy_name"`
+	PolicyType     string     `json:"policy_type"` // "NetworkPolicy", "CiliumNetworkPolicy"
+	Namespace      string     `json:"namespace"`
+	AppliedTime    time.Time  `json:"applied_time"`
+	Status         string     `json:"status"` // "applied", "failed", "verified"
+	Error          string     `json:"error,omitempty"`
+	VerifiedTime   *time.Time `json:"verified_time,omitempty"`
+	EnforcementLog string     `json:"enforcement_log,omitempty"`
+}
+
+// ConnectivityTestResult tracks individual connectivity test attempts with comprehensive data
+type ConnectivityTestResult struct {
+	SourcePod      string    `json:"source_pod"`
+	SourcePodIP    string    `json:"source_pod_ip,omitempty"`
+	TargetPod      string    `json:"target_pod,omitempty"`
+	TargetPodIP    string    `json:"target_pod_ip,omitempty"`
+	TargetService  string    `json:"target_service,omitempty"`
+	TestType       string    `json:"test_type"` // "http", "dns", "ping", "tcp"
+	StartTime      time.Time `json:"start_time"`
+	Duration       float64   `json:"duration_seconds"`
+	Success        bool      `json:"success"`
+	HTTPStatusCode string    `json:"http_status_code,omitempty"`
+	ResponseBody   string    `json:"response_body,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	NetworkPath    []string  `json:"network_path,omitempty"` // IPs traversed
+	DNSResponse    string    `json:"dns_response,omitempty"`
+	Command        string    `json:"command,omitempty"` // The actual command executed
+}
+
+// FailurePoint represents a specific point of failure during test execution
+type FailurePoint struct {
+	Phase       string                 `json:"phase"`     // "environment", "setup", "execution", "verification", "cleanup"
+	Component   string                 `json:"component"` // "pod", "service", "policy", "network", "dns"
+	Error       string                 `json:"error"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Context     map[string]interface{} `json:"context,omitempty"`
+	Remediation []string               `json:"remediation_suggestions,omitempty"`
+}
+
+// CleanupResult tracks cleanup operations success/failure
+type CleanupResult struct {
+	StartTime        time.Time `json:"start_time"`
+	EndTime          time.Time `json:"end_time"`
+	PodsDeleted      int       `json:"pods_deleted"`
+	ServicesDeleted  int       `json:"services_deleted"`
+	PoliciesDeleted  int       `json:"policies_deleted"`
+	NamespaceDeleted bool      `json:"namespace_deleted"`
+	CleanupErrors    []string  `json:"cleanup_errors,omitempty"`
+	CompletionStatus string    `json:"completion_status"` // "complete", "partial", "failed"
+}
+
+// UserTestContext provides user-friendly context and messaging
+type UserTestContext struct {
+	Summary      string   `json:"summary"`      // High-level result summary
+	Details      string   `json:"details"`      // What happened during the test
+	Implications string   `json:"implications"` // What this means for their cluster
+	Hints        []string `json:"hints"`        // Actionable next steps
+}
+
+// =============================================================================
+// REUSABLE VALIDATION RESULT TYPES FOR COMMON TEST PATTERNS
+// =============================================================================
+
+// ValidationResult represents the result of a common validation check (environment, resource, connectivity)
+type ValidationResult struct {
+	Success        bool                   `json:"success"`
+	UserMessage    UserMessage            `json:"user_message"`    // User-friendly message with context and hints
+	TechnicalData  map[string]interface{} `json:"technical_data"`  // Technical details for customer service
+	FailureHints   []string               `json:"failure_hints"`   // Specific remediation suggestions
+	Duration       float64                `json:"duration"`        // Time taken for this validation
+	ComponentType  string                 `json:"component_type"`  // "environment", "resource", "connectivity"
+	ComponentName  string                 `json:"component_name"`  // "worker-nodes", "pod", "http-connectivity"
+	ValidationType string                 `json:"validation_type"` // "node-count", "pod-creation", "http-test"
+}
+
+// EnvironmentValidationResult specifically for environment checks (node count, cluster access, CNI health)
+type EnvironmentValidationResult struct {
+	ValidationResult
+	NodeCount          int                    `json:"node_count,omitempty"`
+	CNIProvider        string                 `json:"cni_provider,omitempty"`
+	CNIVersion         string                 `json:"cni_version,omitempty"`
+	ClusterVersion     string                 `json:"cluster_version,omitempty"`
+	EnvironmentDetails map[string]interface{} `json:"environment_details,omitempty"`
+}
+
+// ResourceValidationResult specifically for resource creation/management checks
+type ResourceValidationResult struct {
+	ValidationResult
+	ResourceName   string     `json:"resource_name"`
+	ResourceType   string     `json:"resource_type"`   // "pod", "service", "deployment"
+	ResourceStatus string     `json:"resource_status"` // "created", "failed", "pending", "running", "timeout"
+	CreationTime   time.Time  `json:"creation_time"`
+	ReadyTime      *time.Time `json:"ready_time,omitempty"`
+	ActualNode     string     `json:"actual_node,omitempty"`    // For pod placement validation
+	RequestedNode  string     `json:"requested_node,omitempty"` // For cross-node test validation
+	ResourceIP     string     `json:"resource_ip,omitempty"`    // Pod IP or Service IP
+	Error          string     `json:"error,omitempty"`
+}
+
+// ConnectivityValidationResult specifically for connectivity test checks
+type ConnectivityValidationResult struct {
+	ValidationResult
+	SourcePod     string   `json:"source_pod"`
+	TargetPod     string   `json:"target_pod,omitempty"`
+	TargetService string   `json:"target_service,omitempty"`
+	TestType      string   `json:"test_type"`              // "http", "dns", "ping", "tcp"
+	StatusCode    string   `json:"status_code"`            // HTTP status or test result code
+	ResponseTime  float64  `json:"response_time"`          // Response time in seconds
+	NetworkPath   []string `json:"network_path,omitempty"` // IPs traversed
+	DNSResponse   string   `json:"dns_response,omitempty"`
+	Command       string   `json:"command,omitempty"` // Actual command executed
+	ResponseBody  string   `json:"response_body,omitempty"`
+}
+
+// TestExecutionConfig defines configuration for reusable test execution patterns
+type TestExecutionConfig struct {
+	TestName          string             `json:"test_name"`
+	TestType          string             `json:"test_type"`          // "cross-node", "same-node", "service", "dns"
+	MinWorkerNodes    int                `json:"min_worker_nodes"`   // Minimum nodes required
+	RequiredResources []ResourceSpec     `json:"required_resources"` // Resources to create
+	ConnectivityTests []ConnectivitySpec `json:"connectivity_tests"` // Connectivity tests to run
+	Timeout           time.Duration      `json:"timeout"`            // Test timeout
+	RetryCount        int                `json:"retry_count"`        // Number of retries for failed operations
+	CleanupOnFailure  bool               `json:"cleanup_on_failure"` // Whether to cleanup on test failure
+	UserContext       map[string]string  `json:"user_context"`       // Additional user context for messaging
+}
+
+// ResourceSpec defines a resource that needs to be created for a test
+type ResourceSpec struct {
+	Type          string `json:"type"`                   // "pod", "service", "deployment"
+	Name          string `json:"name"`                   // Resource name
+	NodePlacement string `json:"node_placement"`         // "node-0", "node-1", "any"
+	Image         string `json:"image,omitempty"`        // Container image
+	ServiceType   string `json:"service_type,omitempty"` // For services: "ClusterIP", "NodePort"
+	Port          int    `json:"port,omitempty"`         // Service port
+}
+
+// ConnectivitySpec defines a connectivity test to perform
+type ConnectivitySpec struct {
+	Source   string `json:"source"`         // Source resource name
+	Target   string `json:"target"`         // Target resource name or IP
+	Protocol string `json:"protocol"`       // "http", "dns", "ping", "tcp"
+	Port     int    `json:"port,omitempty"` // Port to test
+	Expected string `json:"expected"`       // Expected result: "success", "failure", "blocked"
+}

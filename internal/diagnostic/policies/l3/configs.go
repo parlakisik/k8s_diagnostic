@@ -130,6 +130,28 @@ var L3TestConfigs = []core.PolicyTestConfig{
 		LogStepFile:   "Policy file: kubernetes-service-policy.yaml",
 		ExpectSuccess: true,
 	},
+
+	// Security Subgroup
+	{
+		PolicyPath:    "cilium-policies/1-allow-all/allow-all-policy.yaml",
+		GroupId:       "l3-policies",
+		SubgroupId:    "security",
+		TestId:        "allow-all",
+		TestTitle:     "Allow All Policy Test",
+		LogStepName:   "Deploying allow all policy",
+		LogStepFile:   "Policy file: allow-all-policy.yaml",
+		ExpectSuccess: true,
+	},
+	{
+		PolicyPath:    "cilium-policies/2-deny-all/deny-all-policy.yaml",
+		GroupId:       "l3-policies",
+		SubgroupId:    "security",
+		TestId:        "deny-all",
+		TestTitle:     "Deny All Policy Test",
+		LogStepName:   "Deploying deny all policy",
+		LogStepFile:   "Policy file: deny-all-policy.yaml",
+		ExpectSuccess: false,
+	},
 }
 
 // BuildL3TestGroups creates test groups based on requested subgroups using the common framework
@@ -143,8 +165,24 @@ func BuildL3TestGroups(requestedSubgroups []string) []core.PolicyTestGroup {
 		}
 	}
 
-	// Build groups based on requested subgroups
+	// Enforce proper ordering: security tests MUST run last to prevent conflicts
+	orderedSubgroups := []string{}
+	securitySubgroups := []string{}
+
+	// Separate security subgroups from others
 	for _, subgroupName := range requestedSubgroups {
+		if subgroupName == "security" {
+			securitySubgroups = append(securitySubgroups, subgroupName)
+		} else {
+			orderedSubgroups = append(orderedSubgroups, subgroupName)
+		}
+	}
+
+	// Add security subgroups last
+	orderedSubgroups = append(orderedSubgroups, securitySubgroups...)
+
+	// Build groups based on ordered subgroups
+	for _, subgroupName := range orderedSubgroups {
 		testIds, exists := L3PolicySubgroups[subgroupName]
 		if !exists {
 			fmt.Printf("Warning: Subgroup '%s' not found in L3 policies, skipping\n", subgroupName)

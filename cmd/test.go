@@ -540,11 +540,13 @@ func validateIndividualTests(testNames []string) []string {
 	var validTests []string
 
 	for _, testName := range testNames {
-		// Check if it's a direct test ID (exact match)
+		// CRITICAL FIX: Always prioritize exact test ID matches over aliases
+		// This prevents "pod-node-name" from being confused with "node" alias
 		if _, exists := availableTests[testName]; exists {
+			fmt.Printf("DEBUG: Found direct test match: %s\n", testName)
 			validTests = append(validTests, testName)
 		} else if aliasedTests, isAlias := testAliases[testName]; isAlias {
-			// It's an alias - expand it to actual test IDs
+			// Only expand aliases for names that are NOT direct test IDs
 			fmt.Printf("INFO: Expanding alias '%s' to tests: %v\n", testName, aliasedTests)
 
 			// Validate each aliased test exists
@@ -565,30 +567,54 @@ func validateIndividualTests(testNames []string) []string {
 
 // executeIndividualTest executes a single test by finding and running only that specific test
 func executeIndividualTest(testName string, tester *core.Tester, ctx context.Context, verbose bool) core.TestResult {
+	// Emit test start event for real-time UI updates
+	emitSSEEvent(map[string]interface{}{
+		"type":      "test_start",
+		"testName":  testName,
+		"timestamp": time.Now().Format(time.RFC3339),
+	})
+
+	startTime := time.Now()
+
+	var result core.TestResult
+
 	// Try to find the test in networking configs first
 	if networkingConfig := getNetworkingTestConfig(testName); networkingConfig != nil {
-		return executeSingleNetworkingTest(*networkingConfig, tester, ctx, verbose)
+		result = executeSingleNetworkingTest(*networkingConfig, tester, ctx, verbose)
+	} else if l3Config := getL3TestConfig(testName); l3Config != nil {
+		// Try to find the test in L3 configs
+		result = executeSinglePolicyTest(*l3Config, tester, ctx, verbose)
+	} else if l4Config := getL4TestConfig(testName); l4Config != nil {
+		// Try to find the test in L4 configs
+		result = executeSinglePolicyTest(*l4Config, tester, ctx, verbose)
+	} else if l7Config := getL7TestConfig(testName); l7Config != nil {
+		// Try to find the test in L7 configs
+		result = executeSinglePolicyTest(*l7Config, tester, ctx, verbose)
+	} else {
+		result = core.TestResult{
+			Success: false,
+			Message: fmt.Sprintf("Test '%s' not found in any test configuration", testName),
+		}
 	}
 
-	// Try to find the test in L3 configs
-	if l3Config := getL3TestConfig(testName); l3Config != nil {
-		return executeSinglePolicyTest(*l3Config, tester, ctx, verbose)
-	}
+	endTime := time.Now()
+	duration := endTime.Sub(startTime).Seconds()
 
-	// Try to find the test in L4 configs
-	if l4Config := getL4TestConfig(testName); l4Config != nil {
-		return executeSinglePolicyTest(*l4Config, tester, ctx, verbose)
-	}
+	// Generate user-friendly message for the test result
+	userMessage := generateUserMessageForTest(testName, result, duration)
 
-	// Try to find the test in L7 configs
-	if l7Config := getL7TestConfig(testName); l7Config != nil {
-		return executeSinglePolicyTest(*l7Config, tester, ctx, verbose)
-	}
+	// Emit test complete event with user message for real-time UI updates
+	emitSSEEvent(map[string]interface{}{
+		"type":        "test_complete",
+		"testName":    testName,
+		"success":     result.Success,
+		"duration":    duration,
+		"summary":     result.Message,
+		"userMessage": userMessage,
+		"timestamp":   endTime.Format(time.RFC3339),
+	})
 
-	return core.TestResult{
-		Success: false,
-		Message: fmt.Sprintf("Test '%s' not found in any test configuration", testName),
-	}
+	return result
 }
 
 // getNetworkingTestConfig finds a networking test config by test ID
@@ -807,7 +833,7 @@ func getL7SubgroupForTest(testId string) string {
 
 // ensureBinaryIsUpToDate checks if the k8s_diagnostic binary needs to be rebuilt
 func ensureBinaryIsUpToDate() error {
-	binaryPath := "k8s_diagnostic"
+	binaryPath := "k8s-diagnostic"
 
 	// Check if binary exists
 	binaryInfo, err := os.Stat(binaryPath)
@@ -856,7 +882,7 @@ func ensureBinaryIsUpToDate() error {
 
 // buildBinary rebuilds the k8s_diagnostic binary
 func buildBinary() error {
-	cmd := exec.Command("go", "build", "-o", "k8s_diagnostic", ".")
+	cmd := exec.Command("go", "build", "-o", "k8s-diagnostic", ".")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
@@ -1164,7 +1190,9 @@ All test resources will be created in the specified namespace (default: diagnost
 		}
 
 		// Universal pre-test cleanup before ANY testing begins - uses clean hierarchical format
+		fmt.Printf("🧹 Pre-test cleanup phase...\n")
 		tester.CleanupAllTestResources(timeoutCtx, false)
+		fmt.Printf("✅ Pre-test cleanup completed\n")
 
 		// Run all diagnostic tests
 		fmt.Printf("🧪 Running diagnostic tests...\n")
@@ -1663,6 +1691,46 @@ func getAvailableGroups() []string {
 		groups = append(groups, group)
 	}
 	return groups
+}
+
+// emitSSEEvent emits a structured JSON event to stdout for real-time API streaming
+func emitSSEEvent(eventData map[string]interface{}) {
+	// Only emit SSE events when running in batch mode (detected via environment variable)
+	if os.Getenv("BATCH_TEST_ID") != "" {
+		jsonData, err := json.Marshal(eventData)
+		if err == nil {
+			fmt.Printf("SSE_EVENT:%s\n", string(jsonData))
+		}
+	}
+}
+
+// generateUserMessageForTest creates context-aware user messages for individual test results
+func generateUserMessageForTest(testName string, result core.TestResult, duration float64) map[string]interface{} {
+	// Create infrastructure-aware user message generator
+	var infrastructure *core.ClusterInfrastructure
+	if tester, err := core.NewTester("", "diagnostic-test", false); err == nil {
+		collector := core.NewInfrastructureCollector(tester.GetClientset(), false)
+		infrastructure = collector.CollectInfrastructure(context.Background())
+	}
+
+	generator := core.NewUserMessageGenerator(testName, infrastructure)
+
+	// Generate appropriate message based on test result
+	var userMsg core.UserMessage
+	if result.Success {
+		userMsg = generator.GenerateTestSummary(testName, true, duration, nil)
+	} else {
+		userMsg = generator.GenerateTestSummary(testName, false, duration, nil)
+	}
+
+	// Convert to map for JSON serialization
+	return map[string]interface{}{
+		"title":       userMsg.Title,
+		"description": userMsg.Description,
+		"context":     userMsg.Context,
+		"hints":       userMsg.Hints,
+		"status":      userMsg.Status,
+	}
 }
 
 // showAvailableOptions displays available test groups and examples

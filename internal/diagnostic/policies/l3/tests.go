@@ -22,6 +22,7 @@ var L3PolicySubgroups = map[string][]string{
 	"dns":      {"dns-based"},
 	"node":     {"node-selector", "pod-node-name", "node-cidr", "node-based"},
 	"service":  {"kubernetes-service"},
+	"security": {"allow-all", "deny-all"},
 }
 
 // Map of test names to test keys (for CLI reference)
@@ -37,6 +38,8 @@ var L3PolicyTestNameToKey = map[string]string{
 	"node-cidr":                 "node-cidr",
 	"node-based":                "node-based",
 	"kubernetes-service":        "kubernetes-service",
+	"allow-all":                 "allow-all",
+	"deny-all":                  "deny-all",
 }
 
 // TestCIDRIngressPolicy tests the CIDR-based ingress policy using common framework
@@ -303,6 +306,54 @@ func TestKubernetesServicePolicy(logger *core.MultiChannelLogger, t *core.Tester
 	)
 }
 
+// TestAllowAllPolicy tests the allow-all policy using common framework
+func TestAllowAllPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	// Find config from L3TestConfigs (no more hardcoded values)
+	var config core.PolicyTestConfig
+	for _, cfg := range L3TestConfigs {
+		if cfg.TestId == "allow-all" {
+			config = cfg
+			break
+		}
+	}
+
+	// Use common framework for execution
+	return core.ExecutePolicyTest(
+		config,
+		logger,
+		t,
+		ctx,
+		reuseResources,
+		verbose,
+		testNumber,
+		totalTests,
+	)
+}
+
+// TestDenyAllPolicy tests the deny-all policy using common framework
+func TestDenyAllPolicy(logger *core.MultiChannelLogger, t *core.Tester, ctx context.Context, reuseResources bool, verbose bool, testNumber int, totalTests int) TestResult {
+	// Find config from L3TestConfigs (no more hardcoded values)
+	var config core.PolicyTestConfig
+	for _, cfg := range L3TestConfigs {
+		if cfg.TestId == "deny-all" {
+			config = cfg
+			break
+		}
+	}
+
+	// Use common framework for execution
+	return core.ExecutePolicyTest(
+		config,
+		logger,
+		t,
+		ctx,
+		reuseResources,
+		verbose,
+		testNumber,
+		totalTests,
+	)
+}
+
 // TestL3PoliciesSequential runs L3 policy tests with sequential execution for clean policy isolation
 func TestL3PoliciesSequential(t *core.Tester, ctx context.Context, requestedSubgroups []string, verbose ...bool) []TestResult {
 	// Determine verbose mode
@@ -361,6 +412,8 @@ func TestL3PoliciesSequential(t *core.Tester, ctx context.Context, requestedSubg
 		"node-cidr":          "Node CIDR Policy",
 		"node-based":         "Node Based Policy Clusterwide",
 		"kubernetes-service": "Kubernetes Service Policy",
+		"allow-all":          "Allow All Policy",
+		"deny-all":           "Deny All Policy",
 	}
 
 	// Display enhanced verbose summary with Expected vs Received details

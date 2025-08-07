@@ -3,11 +3,11 @@ kind: CiliumClusterwideNetworkPolicy
 metadata:
   name: "deny-all-traffic"
 spec:
-  description: "Deny all traffic from client to web"
-  endpointSelector:
-    matchLabels:
-      run: web
+  description: "Deny all traffic between pods in the test namespace"
+  endpointSelector: {}  # Apply to ALL pods (empty selector = all pods)
   ingressDeny:
   - fromEndpoints:
-    - matchLabels:
-        run: client
+    - {}  # Deny from ALL endpoints (empty selector = all endpoints)
+  egressDeny:
+  - toEndpoints:
+    - {}  # Also deny egress to ALL endpoints for comprehensive blocking

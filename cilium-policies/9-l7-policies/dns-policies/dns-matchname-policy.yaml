@@ -3,43 +3,34 @@ kind: CiliumNetworkPolicy
 metadata:
   name: "dns-matchname-policy"
 spec:
-  description: "L7 DNS policy allowing specific domain names using exact matching"
+  description: "DNS L7 policy based on Cilium documentation - allowing specific domain names using exact matching"
   endpointSelector:
     matchLabels:
       app: client
   egress:
-  # Allow DNS queries to DNS server
+  # DNS L7 rules - Allow DNS queries to DNS server (from Cilium docs)
   - toEndpoints:
     - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": kube-system
-        "k8s:k8s-app": kube-dns
+       "k8s:io.kubernetes.pod.namespace": kube-system
+       "k8s:k8s-app": kube-dns
     toPorts:
       - ports:
          - port: "53"
            protocol: ANY
         rules:
           dns:
-            # External domains - exact match required (using dynamic template variables)
-            - matchName: "{{CILIUM_BASE_DOMAIN}}"  # Base domain extracted from {{CILIUM_DOMAIN_WILDCARD}}
-            - matchName: "{{CILIUM_API_DOMAIN}}"
-            - matchName: "{{CILIUM_DOCS_DOMAIN}}"
-            - matchName: "{{GITHUB_BASE_DOMAIN}}"  # Base domain extracted from {{GITHUB_DOMAIN_WILDCARD}}
-            - matchName: "{{DOCKER_REGISTRY_DOMAIN}}"  # Dynamic Docker registry domain
-            
-            # Kubernetes internal services - exact match (using cluster domain)
-            - matchName: "kubernetes.default.svc.{{CLUSTER_DOMAIN}}"
-            - matchName: "kube-dns.kube-system.svc.{{CLUSTER_DOMAIN}}"
-            - matchName: "metrics-server.kube-system.svc.{{CLUSTER_DOMAIN}}"
-            
-            # Application-specific services (using dynamic cluster domain)
-            - matchName: "postgres.database.svc.{{CLUSTER_DOMAIN}}"
-            - matchName: "redis.cache.svc.{{CLUSTER_DOMAIN}}"
+            - matchName: "cilium.io"
+            - matchPattern: "*.cilium.io"
+            - matchPattern: "*.api.cilium.io"
 
-  # Allow actual traffic to target pods/services after DNS resolution
-  - toEndpoints:
-    - matchLabels:
-        app: api
+  # CRITICAL: toFQDNs section (as per Cilium documentation)
+  # This allows connections to IPs returned by DNS queries
+  - toFQDNs:
+      - matchName: "cilium.io"
+      - matchName: "sub.cilium.io"
+      - matchName: "service1.api.cilium.io"
+      - matchPattern: "special*service.api.cilium.io"
     toPorts:
-    - ports:
-      - port: "80"
-        protocol: TCP
+      - ports:
+         - port: "80"
+           protocol: TCP
