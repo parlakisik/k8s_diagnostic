@@ -1,15 +1,22 @@
-# Project binaries - DO NOT COMMIT
+# ==========================================
+# PROJECT BINARIES - DO NOT COMMIT
+# ==========================================
+# Go binary outputs (all variations)
 k8s-diagnostic
 k8s_diagnostic
 /k8s-diagnostic
 /k8s_diagnostic
+build/k8s-diagnostic
+build/k8s_diagnostic
 
-# Binaries for programs and plugins
+# Generic binaries for programs and plugins
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+*.bin
+*.app
 
 # Test binary, built with `go test -c`
 *.test
@@ -17,17 +24,56 @@ k8s_diagnostic
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
 # Go workspace file
 go.work
 
-# IDE files
+# Go vendor directory (uncomment if using)
+# vendor/
+
+# ==========================================
+# NODE.JS / NPM DEPENDENCIES - DO NOT COMMIT
+# ==========================================
+# Dependencies at any level
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# NPM/Yarn logs and caches
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+.yarn-integrity
+.pnp.*
+
+# Package-lock files (optional - comment out if you want to track them)
+# package-lock.json
+# yarn.lock
+
+# ==========================================
+# NEXT.JS BUILD ARTIFACTS
+# ==========================================
+# Next.js build output
+web/.next/
+web/out/
+web/dist/
+
+# Next.js cache
+web/.next/cache/
+
+# ==========================================
+# IDE AND EDITOR FILES
+# ==========================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# OS generated files
+# ==========================================
+# OS GENERATED FILES
+# ==========================================
 .DS_Store
 .DS_Store?
 ._*
@@ -35,41 +81,48 @@ go.work
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Test results and logs
+# ==========================================
+# BUILD AND OUTPUT DIRECTORIES
+# ==========================================
+build/
+dist/
+out/
+
+# ==========================================
+# LOGS AND TEMPORARY FILES
+# ==========================================
+*.log
+*.tmp
+*.temp
+*.cache
+
+# Test results and logs (but keep .gitkeep)
 test_results/*.json
 test_results/logs/
 !test_results/.gitkeep
 
-# Build directory
-build/
-
-# Temporary files
-*.tmp
-*.log
-
-# Backup files
+# ==========================================
+# BACKUP FILES
+# ==========================================
 *.bak
+*.backup
+*.orig
 
-# Cilium policy files (now tracked)
-# cilium-policies/ - removed from gitignore
-
+# ==========================================
+# PROJECT SPECIFIC EXCLUSIONS
+# ==========================================
 # EKS-A testing files
 eks-a-policy-tests/
 
-# Node.js dependencies
-node_modules/
-*/node_modules/
-**/node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.npm
-.yarn-integrity
-
-# Demo script
+# Demo and test scripts
 demo_clusters.sh
 basic-network-test.sh
 
-# Next.js build artifacts and development files
-web/.next/
+# Environment files (if any)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
