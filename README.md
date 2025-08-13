@@ -129,7 +129,7 @@ L3 policy tests validate Cilium's Layer 3 network policies using sequential exec
 
 ### L3 Test Subgroups
 
-The L3 tests are organized into 6 subgroups:
+The L3 tests are organized into 7 subgroups:
 
 | Subgroup | Tests | Description |
 |----------|-------|-------------|
@@ -139,6 +139,7 @@ The L3 tests are organized into 6 subgroups:
 | dns | 1 test | DNS-based filtering policies |
 | node | 4 tests | Node selectors, pod node filtering, node CIDR targeting |
 | service | 1 test | Kubernetes service targeting |
+| security | 2 tests | Baseline security policies (allow-all, deny-all) |
 
 ### Running L3 Tests
 
@@ -158,7 +159,7 @@ You can run any combination of subgroups together:
 
 ## L3 Policy Test Guide
 
-This section provides a focused guide to all **11 individual L3 policy tests**, explaining what each test validates and how to run them.
+This section provides a focused guide to all **13 individual L3 policy tests**, explaining what each test validates and how to run them.
 
 ### IP-CIDR Subgroup (3 tests)
 
@@ -267,6 +268,27 @@ This section provides a focused guide to all **11 individual L3 policy tests**, 
 # Combine with other single-test subgroups
 ./k8s-diagnostic test --test-group l3-policies --l3-subgroups service,dns,entities
 ```
+
+### Security Subgroup (2 tests)
+
+#### 12. **allow-all** - Allow All Policy Test
+**What it tests:** Validates baseline allow-all policies that permit all ingress and egress traffic  
+**Why we test it:** Establishes baseline connectivity and ensures policy infrastructure works before restrictive tests  
+**How to run:**
+```bash
+# Run only security tests (includes allow-all and deny-all)
+./k8s-diagnostic test --test-group l3-policies --l3-subgroups security
+
+# Combine with other subgroups (security tests run last to prevent conflicts)
+./k8s-diagnostic test --test-group l3-policies --l3-subgroups ip-cidr,security
+```
+
+#### 13. **deny-all** - Deny All Policy Test
+**What it tests:** Validates restrictive deny-all policies that block all ingress and egress traffic  
+**Why we test it:** Ensures policy enforcement works and tests policy isolation capabilities  
+**How to run:** Same commands as `allow-all` (part of security subgroup)
+
+**Note:** Security tests are automatically run last to prevent interference with other policy tests.
 
 ### Common Test Execution Options
 

@@ -1769,7 +1769,7 @@ func init() {
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run")
 
 	// L3 policy subgroup selection
-	testCmd.Flags().StringSlice("l3-subgroups", nil, "L3 policy subgroups to run: ip-cidr,endpoint,entities,dns,node,service")
+	testCmd.Flags().StringSlice("l3-subgroups", nil, "L3 policy subgroups to run: ip-cidr,endpoint,entities,dns,node,service,security")
 
 	// L4 policy subgroup selection
 	testCmd.Flags().StringSlice("l4-subgroups", nil, "L4 policy subgroups to run: port,icmp,tls-sni")
