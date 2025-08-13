@@ -1,0 +1,24 @@
+{
+  "name": "k8s-diagnostic-ui",
+  "version": "1.0.0",
+  "description": "Web UI for k8s-diagnostic CLI tool",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.3.0",
+    "@tailwindcss/forms": "^0.5.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31",
+    "eslint": "^8",
+    "eslint-config-next": "14.0.0"
+  }
+}
