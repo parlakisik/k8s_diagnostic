@@ -416,6 +416,8 @@ var availableTests = map[string]TestEntry{
 	"node-cidr":          {"Node CIDR Policy Test", nil},
 	"node-based":         {"Node Based Policy Clusterwide Test", nil},
 	"kubernetes-service": {"Kubernetes Service Policy Test", nil},
+	"allow-all":          {"Allow All Policy Test", nil},
+	"deny-all":           {"Deny All Policy Test", nil},
 
 	// L4 Policies (from l4/configs.go)
 	"tcp-port-ingress": {"TCP Port Ingress Policy Test", nil},
@@ -482,7 +484,7 @@ var testGroups = map[string][]string{
 		"cidr-ingress", "cidr-egress", "cidr-except",
 		"endpoints-label", "entities-based", "dns-based",
 		"node-selector", "pod-node-name", "node-cidr", "node-based",
-		"kubernetes-service",
+		"kubernetes-service", "allow-all", "deny-all",
 	},
 	"l4-policies": {
 		"tcp-port-ingress", "tcp-port-egress", "port-range", "multiple-port",
@@ -1767,7 +1769,7 @@ func init() {
 	testCmd.Flags().StringSlice("test-list", nil, "comma-separated list of tests to run")
 
 	// L3 policy subgroup selection
-	testCmd.Flags().StringSlice("l3-subgroups", nil, "L3 policy subgroups to run: ip-cidr,endpoint,entities,dns,node,service")
+	testCmd.Flags().StringSlice("l3-subgroups", nil, "L3 policy subgroups to run: ip-cidr,endpoint,entities,dns,node,service,security")
 
 	// L4 policy subgroup selection
 	testCmd.Flags().StringSlice("l4-subgroups", nil, "L4 policy subgroups to run: port,icmp,tls-sni")

@@ -195,6 +195,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const [selectedTests, setSelectedTests] = useState(new Set(testQueue)); // Initialize with all tests selected
   const [backendError, setBackendError] = useState(null); // Track backend process errors
   const [connectionLost, setConnectionLost] = useState(false); // Track SSE connection status
+  const [showCliCommands, setShowCliCommands] = useState(false); // CLI commands visibility toggle
   
   // 🕒 Progressive Status System - Track test timing for user feedback
   const [testStartTimes, setTestStartTimes] = useState(new Map());
@@ -1235,6 +1236,11 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     }
   };
 
+  // Toggle CLI commands visibility
+  const toggleCliCommands = () => {
+    setShowCliCommands(!showCliCommands);
+  };
+
   // Get the predominant category color for the current test batch
   const getCurrentCategoryColor = () => {
     if (selectedTests.size === 0) return '#14b8a6'; // teal-500 fallback
@@ -1557,6 +1563,22 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
             >
               🛑 Stop Tests
             </button>
+
+            {/* 5. Toggle CLI Commands - Always visible */}
+            <button 
+              onClick={toggleCliCommands}
+              className="font-comfortaa font-semibold hover-lift card-shadow"
+              style={{ 
+                padding: '12px 24px', 
+                borderRadius: '5px',
+                border: 'none',
+                backgroundColor: showCliCommands ? '#000000' : '#fbbf24',
+                color: showCliCommands ? '#ffffff' : '#000000'
+              }}
+              title={showCliCommands ? "Hide CLI commands from all test cards" : "Show CLI commands in all test cards"}
+            >
+              {showCliCommands ? 'Hide CLI Commands' : 'Show CLI Commands'}
+            </button>
           </div>
         </div>
 
@@ -1731,39 +1753,41 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               </div>
 
               {/* CLI Command Section - Terminal Style */}
-              <div className="rounded text-white cli-command mb-3" style={{
-                fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
-                fontWeight: 'normal',
-                backgroundColor: 'rgb(55, 65, 81)',
-                fontSize: '0.875rem',
-                letterSpacing: '0.025em',
-                lineHeight: '1.5',
-                color: 'rgb(255, 255, 255)',
-                padding: '5px 30px 5px 5px',
-                margin: '5px',
-                display: 'block',
-                position: 'relative'
-              }}>
-                ./k8s_diagnostic test list: {testName} --verbose
-                <span 
-                  title="Copy command to clipboard"
-                  onClick={() => copyCommandToClipboard(testName)}
-                  style={{
-                    position: 'absolute',
-                    right: '5px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    cursor: 'pointer',
-                    fontSize: '0.875rem',
-                    opacity: '0.8',
-                    transition: 'opacity 0.2s'
-                  }}
-                  onMouseEnter={(e) => e.target.style.opacity = '1'}
-                  onMouseLeave={(e) => e.target.style.opacity = '0.8'}
-                >
-                  📋
-                </span>
-              </div>
+              {showCliCommands && (
+                <div className="rounded text-white cli-command mb-3" style={{
+                  fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
+                  fontWeight: 'normal',
+                  backgroundColor: 'rgb(55, 65, 81)',
+                  fontSize: '0.875rem',
+                  letterSpacing: '0.025em',
+                  lineHeight: '1.5',
+                  color: 'rgb(255, 255, 255)',
+                  padding: '5px 30px 5px 5px',
+                  margin: '5px',
+                  display: 'block',
+                  position: 'relative'
+                }}>
+                  ./k8s_diagnostic test list: {testName} --verbose
+                  <span 
+                    title="Copy command to clipboard"
+                    onClick={() => copyCommandToClipboard(testName)}
+                    style={{
+                      position: 'absolute',
+                      right: '5px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem',
+                      opacity: '0.8',
+                      transition: 'opacity 0.2s'
+                    }}
+                    onMouseEnter={(e) => e.target.style.opacity = '1'}
+                    onMouseLeave={(e) => e.target.style.opacity = '0.8'}
+                  >
+                    📋
+                  </span>
+                </div>
+              )}
 
               {/* Rich Status Area with User Messages */}
               <div className="bg-white bg-opacity-70 rounded-lg p-3 min-h-20">
@@ -1857,8 +1881,19 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                 
                 {/* Fallback display for other statuses */}
                 {!hasStarted && (
-                  <div className="text-gray-600 font-inter">
-                    <span className="text-sm">Ready to run</span>
+                  <div className="font-inter" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div></div>
+                    <span style={{
+                      backgroundColor: '#10b981',
+                      color: '#ffffff',
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      fontSize: '0.75rem',
+                      fontWeight: '500',
+                      display: 'inline-block'
+                    }}>
+                      Ready to run
+                    </span>
                   </div>
                 )}
               </div>
