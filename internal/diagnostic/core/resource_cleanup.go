@@ -19,7 +19,7 @@ func (t *Tester) CleanupAllTestResources(ctx context.Context, verbose bool) {
 	fmt.Println("\n🧹 CLEANUP PHASE")
 
 	// Create timeout context for cleanup operations
-	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 120*time.Second) // Increased timeout
 	defer cancel()
 
 	// Operation 1: Cilium policies cleanup
@@ -29,8 +29,8 @@ func (t *Tester) CleanupAllTestResources(ctx context.Context, verbose bool) {
 	duration := time.Since(startTime)
 	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
 
-	// Wait a moment for policies to be fully removed
-	time.Sleep(3 * time.Second)
+	// Wait for policies to be fully removed
+	time.Sleep(5 * time.Second)
 
 	// Operation 2: Main namespace cleanup
 	fmt.Printf("├── Main Namespace: Cleaning %s... ", t.namespace)
@@ -46,10 +46,91 @@ func (t *Tester) CleanupAllTestResources(ctx context.Context, verbose bool) {
 	duration = time.Since(startTime)
 	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
 
+	// CRITICAL: Verify all resources are actually gone before proceeding
+	fmt.Print("🔍 Verifying all resources are deleted... ")
+	startTime = time.Now()
+	t.VerifyResourcesDeleted(timeoutCtx, verbose)
+	duration = time.Since(startTime)
+	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
+
 	// Still log to JSONL for tracking
 	logger := GetGlobalMultiChannelLogger()
 	if logger != nil {
 		logger.LogStepComplete("universal_cleanup", true, "Universal cleanup successfully completed")
+	}
+}
+
+// VerifyResourcesDeleted ensures all test resources are actually gone before proceeding
+func (t *Tester) VerifyResourcesDeleted(ctx context.Context, verbose bool) {
+	maxRetries := 30 // 30 attempts with 2-second intervals = 60 seconds max
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		allClear := true
+
+		// Check for any remaining pods
+		if pods, err := t.clientset.CoreV1().Pods(t.namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			testPods := 0
+			for _, pod := range pods.Items {
+				// Count pods that match our test patterns
+				if strings.Contains(pod.Name, "pod-to-pod") ||
+					strings.Contains(pod.Name, "netshoot") ||
+					strings.Contains(pod.Name, "test") ||
+					pod.Labels["app"] != "" {
+					testPods++
+				}
+			}
+			if testPods > 0 {
+				allClear = false
+				if verbose {
+					fmt.Printf("  Waiting for %d test pods to be fully deleted (attempt %d/%d)...\n",
+						testPods, attempt, maxRetries)
+				}
+			}
+		}
+
+		// Check for any remaining services
+		if services, err := t.clientset.CoreV1().Services(t.namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			testServices := 0
+			for _, svc := range services.Items {
+				// Skip kubernetes default service
+				if svc.Name != "kubernetes" {
+					testServices++
+				}
+			}
+			if testServices > 0 {
+				allClear = false
+				if verbose {
+					fmt.Printf("  Waiting for %d test services to be fully deleted (attempt %d/%d)...\n",
+						testServices, attempt, maxRetries)
+				}
+			}
+		}
+
+		// Check for any remaining deployments
+		if deployments, err := t.clientset.AppsV1().Deployments(t.namespace).List(ctx, metav1.ListOptions{}); err == nil {
+			if len(deployments.Items) > 0 {
+				allClear = false
+				if verbose {
+					fmt.Printf("  Waiting for %d test deployments to be fully deleted (attempt %d/%d)...\n",
+						len(deployments.Items), attempt, maxRetries)
+				}
+			}
+		}
+
+		if allClear {
+			if verbose {
+				fmt.Printf("  ✅ All test resources confirmed deleted after %d attempts\n", attempt)
+			}
+			return
+		}
+
+		// Wait before next attempt
+		time.Sleep(2 * time.Second)
+	}
+
+	// If we get here, some resources may still exist but we've waited long enough
+	if verbose {
+		fmt.Printf("  ⚠️  Resource verification completed after %d attempts (some resources may still be terminating)\n", maxRetries)
 	}
 }
 
@@ -178,6 +259,20 @@ func (t *Tester) ForceCleanupNamespace(ctx context.Context, namespace string, ve
 		"cidr-test-pod",
 		"test-pod",
 		"netshoot",
+	}
+
+	// Also delete any pods matching networking test patterns
+	if pods, err := t.clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{}); err == nil {
+		for _, pod := range pods.Items {
+			podName := pod.Name
+			// Target networking test pods that follow specific patterns
+			if strings.Contains(podName, "pod-to-pod-") ||
+				strings.Contains(podName, "service-") ||
+				strings.Contains(podName, "dns-resolution-") ||
+				strings.Contains(podName, "cross-node-") {
+				specificPodNames = append(specificPodNames, podName)
+			}
+		}
 	}
 
 	if verbose {

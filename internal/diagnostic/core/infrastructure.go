@@ -1061,16 +1061,49 @@ func (ic *InfrastructureCollector) discoverTestDomainPatternWithStatus(ctx conte
 	return pattern
 }
 
-// extractDNSFromCoreDNS extracts DNS servers from CoreDNS configuration
+// CoreDNSConfig contains CoreDNS configuration analysis
+type CoreDNSConfig struct {
+	DNS1           string `json:"dns1"`
+	DNS2           string `json:"dns2"`
+	ForwardConfig  string `json:"forwardConfig"`
+	IsBroken       bool   `json:"isBroken"`
+	BrokenReason   string `json:"brokenReason,omitempty"`
+	RecommendedFix string `json:"recommendedFix,omitempty"`
+	WorkingExample string `json:"workingExample,omitempty"`
+}
+
+// extractDNSFromCoreDNS extracts DNS servers from CoreDNS configuration with diagnostic analysis
 func (ic *InfrastructureCollector) extractDNSFromCoreDNS(ctx context.Context) (string, string) {
+	config := ic.AnalyzeCoreDNSConfig(ctx)
+
+	if config.IsBroken {
+		if ic.verbose {
+			fmt.Printf("  ⚠️ CoreDNS upstream DNS misconfiguration detected:\n")
+			fmt.Printf("    Current: %s\n", config.ForwardConfig)
+			fmt.Printf("    Issue: %s\n", config.BrokenReason)
+			fmt.Printf("    Fix: %s\n", config.RecommendedFix)
+		}
+	}
+
+	return config.DNS1, config.DNS2
+}
+
+// AnalyzeCoreDNSConfig performs comprehensive CoreDNS configuration analysis
+func (ic *InfrastructureCollector) AnalyzeCoreDNSConfig(ctx context.Context) *CoreDNSConfig {
+	config := &CoreDNSConfig{}
+
 	cm, err := ic.clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "coredns", metav1.GetOptions{})
 	if err != nil {
-		return "", ""
+		config.IsBroken = true
+		config.BrokenReason = "CoreDNS ConfigMap not found"
+		return config
 	}
 
 	corefile, ok := cm.Data["Corefile"]
 	if !ok {
-		return "", ""
+		config.IsBroken = true
+		config.BrokenReason = "Corefile not found in ConfigMap"
+		return config
 	}
 
 	// Parse Corefile for forward/proxy directives
@@ -1080,32 +1113,72 @@ func (ic *InfrastructureCollector) extractDNSFromCoreDNS(ctx context.Context) (s
 
 		// Look for forward directive: "forward . 8.8.8.8 1.1.1.1"
 		if strings.HasPrefix(line, "forward ") {
+			config.ForwardConfig = line
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
-				dns1 := parts[2]
-				dns2 := "8.8.8.8" // default secondary
-				if len(parts) >= 4 {
-					dns2 = parts[3]
+				upstream := parts[2]
+
+				// Check for broken configuration patterns
+				if upstream == "/etc/resolv.conf" {
+					config.IsBroken = true
+					config.BrokenReason = "CoreDNS forwarding to /etc/resolv.conf causes DNS L7 policy failures"
+					config.RecommendedFix = "kubectl patch configmap coredns -n kube-system --patch='data: {\"Corefile\": \".:53 {\\n  errors\\n  health { lameduck 5s }\\n  ready\\n  kubernetes cluster.local in-addr.arpa ip6.arpa { pods insecure; fallthrough in-addr.arpa ip6.arpa; ttl 30 }\\n  prometheus :9153\\n  forward . 8.8.8.8 8.8.4.4 { max_concurrent 1000 }\\n  cache 30 { disable success cluster.local; disable denial cluster.local }\\n  loop\\n  reload\\n  loadbalance\\n}\"}'"
+					config.WorkingExample = "forward . 8.8.8.8 8.8.4.4 { max_concurrent 1000 }"
+					config.DNS1 = "BROKEN"
+					config.DNS2 = "BROKEN"
+				} else if strings.Contains(upstream, "127.0.0.1") || strings.Contains(upstream, "localhost") {
+					config.IsBroken = true
+					config.BrokenReason = "CoreDNS forwarding to localhost/127.0.0.1 may cause DNS resolution failures"
+					config.RecommendedFix = "Use public DNS servers: forward . 8.8.8.8 8.8.4.4"
+					config.WorkingExample = "forward . 8.8.8.8 8.8.4.4 { max_concurrent 1000 }"
+					config.DNS1 = upstream
+					config.DNS2 = "8.8.8.8" // fallback
+				} else {
+					// Appears to be a valid DNS server
+					config.DNS1 = upstream
+					config.DNS2 = "8.8.8.8" // default secondary
+					if len(parts) >= 4 {
+						config.DNS2 = parts[3]
+					}
 				}
-				return dns1, dns2
+				return config
 			}
 		}
 
 		// Look for proxy directive (older CoreDNS versions)
 		if strings.HasPrefix(line, "proxy ") {
+			config.ForwardConfig = line
 			parts := strings.Fields(line)
 			if len(parts) >= 3 {
-				dns1 := parts[2]
-				dns2 := "8.8.8.8" // default secondary
-				if len(parts) >= 4 {
-					dns2 = parts[3]
+				upstream := parts[2]
+
+				// Same analysis for proxy directive
+				if upstream == "/etc/resolv.conf" {
+					config.IsBroken = true
+					config.BrokenReason = "CoreDNS proxy to /etc/resolv.conf causes DNS L7 policy failures"
+					config.RecommendedFix = "Update to forward directive with public DNS servers"
+					config.WorkingExample = "forward . 8.8.8.8 8.8.4.4 { max_concurrent 1000 }"
+					config.DNS1 = "BROKEN"
+					config.DNS2 = "BROKEN"
+				} else {
+					config.DNS1 = upstream
+					config.DNS2 = "8.8.8.8" // default secondary
+					if len(parts) >= 4 {
+						config.DNS2 = parts[3]
+					}
 				}
-				return dns1, dns2
+				return config
 			}
 		}
 	}
 
-	return "", ""
+	// No forward/proxy directive found
+	config.IsBroken = true
+	config.BrokenReason = "No forward or proxy directive found in CoreDNS configuration"
+	config.RecommendedFix = "Add forward directive: forward . 8.8.8.8 8.8.4.4"
+	config.WorkingExample = "forward . 8.8.8.8 8.8.4.4 { max_concurrent 1000 }"
+
+	return config
 }
 
 // extractDNSFromKubeDNS extracts DNS servers from kube-dns configuration

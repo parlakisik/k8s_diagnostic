@@ -1,0 +1,563 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Poppins:wght@500;600;700&family=Comfortaa:wght@400;500;600&family=Roboto:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Preline UI will be imported via JavaScript */
+
+/* Optional Preline UI Styles */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Defaults hover styles on all devices */
+@custom-variant hover (&:hover);
+
+/* Fallback spinner animation - ensures spinner works even if Tailwind animate-spin fails */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+/* Ensure spinner elements have proper styling */
+.spinner-border {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Custom CSS Variables for Colors */
+:root {
+  --color-networking: #ffb3d9;
+  --color-l3-policies: #ffab91;
+  --color-l4-policies: #9fa8da;
+  --color-l7-policies: #f0e68c;
+  --color-dns-service: #ce93d8;
+  --color-infrastructure: #80deea;
+  --color-results: #ff8787;
+}
+
+/* Global Font Assignments */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: white;
+  color: #1f2937;
+  margin: 15px;
+  padding: 20px;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Poppins', sans-serif;
+  font-weight: 600;
+}
+
+button {
+  font-family: 'Comfortaa', sans-serif;
+  font-weight: 500;
+}
+
+.font-poppins {
+  font-family: 'Poppins', sans-serif;
+}
+
+.font-inter {
+  font-family: 'Inter', sans-serif;
+}
+
+.font-comfortaa {
+  font-family: 'Comfortaa', sans-serif;
+}
+
+/* Custom Button Styles */
+.btn-outline {
+  border: 2px solid #000000;
+  border-radius: 12px;
+  background: white;
+  transition: all 0.3s ease;
+}
+
+.btn-outline:hover {
+  background: #f8fafc;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Test Card Colors */
+.test-card-networking {
+  background-color: var(--color-networking);
+  border-color: var(--color-networking);
+}
+
+.test-card-l3 {
+  background-color: var(--color-l3-policies);
+  border-color: var(--color-l3-policies);
+}
+
+.test-card-l4 {
+  background-color: var(--color-l4-policies);
+  border-color: var(--color-l4-policies);
+}
+
+.test-card-l7 {
+  background-color: var(--color-l7-policies);
+  border-color: var(--color-l7-policies);
+}
+
+.test-card-dns {
+  background-color: var(--color-dns-service);
+  border-color: var(--color-dns-service);
+}
+
+.test-card-infrastructure {
+  background-color: var(--color-infrastructure);
+  border-color: var(--color-infrastructure);
+}
+
+.test-card-results {
+  background-color: var(--color-results);
+  border-color: var(--color-results);
+}
+
+/* Animation Classes */
+.animate-bounce-subtle {
+  animation: bounce-subtle 2s infinite;
+}
+
+@keyframes bounce-subtle {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-in;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+/* Custom Scrollbar for Test Output */
+.test-output-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.test-output-scroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+.test-output-scroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+.test-output-scroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Hover Effects */
+.hover-lift:hover {
+  transform: translateY(-2px);
+  transition: transform 0.2s ease;
+}
+
+.hover-glow:hover {
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.3s ease;
+}
+
+/* Queue Badge */
+.queue-badge {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  animation: pulse 2s infinite;
+}
+
+/* Surprise Me Button Special Styling - Purple */
+.surprise-btn {
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.surprise-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.8s ease;
+}
+
+.surprise-btn:hover::before {
+  left: 100%;
+}
+
+/* Custom Picker Button Special Styling - Blue */
+.custom-picker-btn {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.custom-picker-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.8s ease;
+}
+
+.custom-picker-btn:hover::before {
+  left: 100%;
+}
+
+/* Cleanup Button Special Styling - Now Green */
+.cleanup-btn {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  color: white;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.cleanup-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.8s ease;
+}
+
+.cleanup-btn:hover::before {
+  left: 100%;
+}
+
+/* Stop Button Special Styling - Red */
+.stop-btn {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  color: white;
+  border: none;
+  position: relative;
+  overflow: hidden;
+}
+
+.stop-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.8s ease;
+}
+
+.stop-btn:hover::before {
+  left: 100%;
+}
+
+/* Cancel Button Special Styling - Solid Red */
+.cancel-btn {
+  background-color: #ef4444 !important;
+  color: white !important;
+  border: none !important;
+}
+
+.cancel-btn:hover {
+  background-color: #dc2626 !important;
+  color: white !important;
+}
+
+/* Success/Error States */
+.state-success {
+  background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+}
+
+.state-error {
+  background: linear-gradient(135deg, #ff8a80 0%, #ff5722 100%);
+}
+
+.state-running {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+/* Professional Card Shadow */
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.card-shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* CLI Command Styling */
+.cli-command {
+  font-family: 'Roboto', sans-serif !important;
+}
+
+/* Force Roboto font with highest specificity */
+div.cli-command,
+.cli-command,
+*[class*="cli-command"] {
+  font-family: 'Roboto', sans-serif !important;
+  font-weight: normal !important;
+}
+
+/* Specific targeting for CLI command container - but EXCLUDE the code block */
+#__next > main > div > div.w-full.max-w-6xl.mx-auto.animate-fade-in > div.bg-white.border-b.border-gray-200.px-6.py-4 > div:nth-child(3),
+#__next > main > div > div.w-full.max-w-6xl.mx-auto.animate-fade-in > div.bg-white.border-b.border-gray-200.px-6.py-4 > div:nth-child(3) > div:first-child,
+div.cli-command.cli-command:not([style*="background-color"]),
+.cli-command.cli-command:not([style*="background-color"]),
+*[class*="cli-command"][class*="cli-command"]:not([style*="background-color"]) {
+  font-family: 'Roboto', sans-serif !important;
+  font-weight: normal !important;
+  color: #1f2937 !important;
+}
+
+/* Override specific Tailwind classes that might interfere */
+.cli-command.mb-2,
+.cli-command.text-gray-700,
+.cli-command.font-bold,
+.cli-command.text-lg,
+.mb-2.text-gray-700.font-bold.text-lg.cli-command,
+div[style*="marginTop: 15px"].cli-command *,
+div[style*="marginTop: 15px"].cli-command div {
+  font-family: 'Roboto', sans-serif !important;
+  font-weight: normal !important;
+  color: #1f2937 !important;
+}
+
+/* Maximum specificity override - this should catch everything */
+[class*="cli-command"][class*="mb-2"][class*="text-gray-700"][class*="font-bold"][class*="text-lg"],
+[style*="marginTop"][class*="cli-command"] [class*="mb-2"],
+[style*="marginTop"][class*="cli-command"] div,
+[style*="marginTop"][class*="cli-command"] * {
+  font-family: 'Roboto', sans-serif !important;
+  font-weight: normal !important;
+  color: #1f2937 !important;
+}
+
+/* Specific styling for CLI command code block - HIGHEST SPECIFICITY */
+#__next > main > div > div.w-full.max-w-6xl.mx-auto.animate-fade-in > div.bg-white.border-b.border-gray-200.px-6.py-4 > div.cli-command > div.rounded.text-white.cli-command,
+#__next > main > div > div.w-full.max-w-6xl.mx-auto.animate-fade-in > div.bg-white.border-b.border-gray-200.px-6.py-4 > div:nth-child(3) > div > div[style*="background-color: rgb(55, 65, 81)"],
+#__next > main > div > div.w-full.max-w-6xl.mx-auto.animate-fade-in > div.bg-white.border-b.border-gray-200.px-6.py-4 > div.cli-command > div:nth-child(2) > div,
+div[class*="rounded"][class*="text-white"][class*="cli-command"],
+.cli-command.rounded.text-white,
+div.cli-command div[class*="rounded"],
+div[style*="background-color: rgb(55, 65, 81)"],
+div[style*="background-color: #374151"] {
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace !important;
+  font-weight: normal !important;
+  background-color: #374151 !important;
+  color: #ffffff !important;
+  font-size: 0.875rem !important;
+  letter-spacing: 0.025em !important;
+  line-height: 1.5 !important;
+  padding: 5px !important;
+  margin: 5px !important;
+  display: block !important;
+  border-radius: 0.375rem !important;
+  width: calc(100% - 10px) !important;
+}
+
+/* Target the CLI command element and its children specifically */
+div[style*="background-color: #374151"] *,
+div[style*="background-color: rgb(55, 65, 81)"] * {
+  color: #ffffff !important;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace !important;
+}
+
+/* Batch Test Execution Container Styling */
+#__next > main > div {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+/* Batch Test Runner Specific Styling */
+.batch-test-runner .test-card {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.batch-test-runner .progress-card {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.batch-test-runner .error-card {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+.batch-test-runner .summary-card {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 5px;
+}
+
+/* Progress Bar Animations */
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes progressPulse {
+  0%, 100% { transform: scaleY(1); filter: brightness(1); }
+  50% { transform: scaleY(1.1); filter: brightness(1.1); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+@keyframes stripeMove {
+  0% { background-position: 0 0; }
+  100% { background-position: 32px 0; }
+}
+
+@keyframes progress-slide {
+  0% { background-position: 0 0; }
+  100% { background-position: 32px 0; }
+}
+
+@keyframes completionGlow {
+  0% { 
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: 0 0 30px rgba(34, 197, 94, 0.8), 0 0 50px rgba(34, 197, 94, 0.3);
+    transform: scale(1.02);
+  }
+  100% { 
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+    transform: scale(1);
+  }
+}
+
+@keyframes successCelebration {
+  0% { opacity: 0; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+@keyframes readyPulse {
+  0%, 100% { 
+    background-position: 0% 0%;
+    filter: brightness(1);
+  }
+  50% { 
+    background-position: 100% 100%;
+    filter: brightness(1.1);
+  }
+}
+
+/* Progress Bar Classes */
+.progress-bar-active {
+  animation: gradientShift 3s ease-in-out infinite, progressPulse 2s ease-in-out infinite;
+}
+
+.progress-bar-complete {
+  animation: completionGlow 1s ease-out;
+}
+
+.progress-bar-ready {
+  animation: readyPulse 4s ease-in-out infinite;
+}
+
+.progress-shimmer {
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+.progress-stripes {
+  animation: stripeMove 1s linear infinite;
+}
+
+.progress-celebration {
+  animation: successCelebration 0.8s ease-out;
+}
+
+/* Responsive Typography */
+@media (max-width: 768px) {
+  h1 {
+    font-size: 1.875rem;
+  }
+  
+  h2 {
+    font-size: 1.5rem;
+  }
+  
+  button {
+    font-size: 0.875rem;
+    padding: 0.5rem 1rem;
+  }
+}
+
+/* Custom Element Styling - 5px border radius and 25px left padding for specified element */
+#__next > main > div > div.bg-white.border-b.border-gray-200.px-6.py-4 > div > div.flex > div > div {
+  border-radius: 5px;
+  padding-left: 25px !important;
+  position: relative; /* Enable absolute positioning for child button */
+}
+
+/* Position button in top right corner */
+#__next > main > div > div.bg-white.border-b.border-gray-200.px-6.py-4 > div > div.flex > div > div > button {
+  position: absolute !important;
+  top: 10px !important;
+  right: 10px !important;
+  z-index: 10 !important;
+}

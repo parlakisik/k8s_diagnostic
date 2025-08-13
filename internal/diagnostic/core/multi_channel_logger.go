@@ -170,14 +170,14 @@ func (p *ProgressTracker) GetProgress() (int, int, string, string, int, int) {
 
 // MultiChannelLogger provides unified logging across all output channels
 type MultiChannelLogger struct {
-	verboseLogger    *Logger             // Existing human-readable logs
-	frontendLogger   *FrontendJSONLogger // Structured JSON Lines
-	progress         *ProgressTracker    // Progress tracking
-	sharedTime       *SharedTimestamp    // Consistent naming
-	verbose          bool                // Verbose mode flag
-	namespace        string              // Test namespace
-	currentHierarchy *HierarchyContext   // Current execution hierarchy
-	mu               sync.RWMutex        // Protect concurrent access
+	verboseLogger    *Logger           // Existing human-readable logs
+	httpLogger       *HTTPLogger       // HTTP-based structured logging
+	progress         *ProgressTracker  // Progress tracking
+	sharedTime       *SharedTimestamp  // Consistent naming
+	verbose          bool              // Verbose mode flag
+	namespace        string            // Test namespace
+	currentHierarchy *HierarchyContext // Current execution hierarchy
+	mu               sync.RWMutex      // Protect concurrent access
 }
 
 // NewMultiChannelLogger creates a new multi-channel logger system
@@ -191,29 +191,32 @@ func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger,
 		return nil, fmt.Errorf("failed to create verbose logger: %v", err)
 	}
 
-	// Create frontend JSON logger (new system)
-	frontendLogger, err := NewFrontendJSONLogger(sharedTime)
+	// Generate a test ID for HTTP logging (using timestamp for uniqueness)
+	testID := fmt.Sprintf("%d", time.Now().UnixNano()/1000000) // Millisecond timestamp
+
+	// Create HTTP logger (new system) - replaces FrontendJSONLogger
+	httpLogger, err := NewHTTPLogger(testID)
 	if err != nil {
 		verboseLogger.Close()
-		return nil, fmt.Errorf("failed to create frontend logger: %v", err)
+		return nil, fmt.Errorf("failed to create HTTP logger: %v", err)
 	}
 
 	// Create progress tracker
 	progress := NewProgressTracker()
 
 	logger := &MultiChannelLogger{
-		verboseLogger:  verboseLogger,
-		frontendLogger: frontendLogger,
-		progress:       progress,
-		sharedTime:     sharedTime,
-		verbose:        verbose,
-		namespace:      namespace,
+		verboseLogger: verboseLogger,
+		httpLogger:    httpLogger,
+		progress:      progress,
+		sharedTime:    sharedTime,
+		verbose:       verbose,
+		namespace:     namespace,
 	}
 
 	// Log initialization to both channels
 	logger.verboseLogger.LogInfo("Multi-channel logging system initialized")
 	logger.verboseLogger.LogInfo("Verbose log: %s", sharedTime.GetLogFilePath())
-	logger.verboseLogger.LogInfo("Frontend log: %s", sharedTime.GetFrontendLogFilePath())
+	logger.verboseLogger.LogInfo("HTTP logger initialized with testID: %s", testID)
 
 	return logger, nil
 }
@@ -232,8 +235,8 @@ func (m *MultiChannelLogger) LogSuiteStart(totalTests int, groups []string) erro
 	m.verboseLogger.LogInfo("Starting Kubernetes diagnostic tests suite")
 	m.verboseLogger.LogInfo("Total tests: %d, Groups: %v", totalTests, groups)
 
-	// Log to frontend system
-	return m.frontendLogger.LogSuiteStart(totalTests, groups)
+	// Log to HTTP logger system
+	return m.httpLogger.LogSuiteStart(totalTests, groups)
 }
 
 // LogSuiteStartWithInfrastructure logs suite start with comprehensive cluster infrastructure context
@@ -257,8 +260,8 @@ func (m *MultiChannelLogger) LogSuiteStartWithInfrastructure(totalTests int, gro
 		}
 	}
 
-	// Log to frontend system with infrastructure context
-	return m.frontendLogger.LogSuiteStartWithInfrastructure(totalTests, groups, infrastructure)
+	// Log to HTTP logger system with infrastructure context
+	return m.httpLogger.LogSuiteStartWithInfrastructure(totalTests, groups, infrastructure)
 }
 
 func (m *MultiChannelLogger) LogSuiteComplete(passed, failed int, duration float64) error {
@@ -270,8 +273,8 @@ func (m *MultiChannelLogger) LogSuiteComplete(passed, failed int, duration float
 	// Log to verbose system
 	m.verboseLogger.LogInfo("Completed test suite: %d passed, %d failed (%.1fs)", passed, failed, duration)
 
-	// Log to frontend system
-	return m.frontendLogger.LogSuiteComplete(totalTests, passed, failed, duration)
+	// Log to HTTP logger system
+	return m.httpLogger.LogSuiteComplete(totalTests, passed, failed, duration)
 }
 
 func (m *MultiChannelLogger) LogSuiteInterrupted(reason string) error {
@@ -281,8 +284,8 @@ func (m *MultiChannelLogger) LogSuiteInterrupted(reason string) error {
 	// Log to verbose system
 	m.verboseLogger.LogWarning("Test suite interrupted: %s", reason)
 
-	// Log to frontend system
-	return m.frontendLogger.LogSuiteInterrupted(reason)
+	// Log to HTTP logger system
+	return m.httpLogger.LogSuiteInterrupted(reason)
 }
 
 // Group level logging methods
@@ -296,8 +299,8 @@ func (m *MultiChannelLogger) LogGroupStart(groupName string, groupNumber, totalG
 	m.verboseLogger.LogInfo("Starting %s test group (%d/%d)", groupName, groupNumber, totalGroups)
 	m.verboseLogger.LogInfo("Subgroups: %v, Tests in group: %d", subgroups, testsInGroup)
 
-	// Log to frontend system
-	return m.frontendLogger.LogGroupStart(groupName, groupNumber, totalGroups, subgroups, testsInGroup)
+	// Log to HTTP logger system
+	return m.httpLogger.LogGroupStart(groupName, groupNumber, totalGroups, subgroups, testsInGroup)
 }
 
 func (m *MultiChannelLogger) LogGroupComplete(groupName string, passed, failed int, duration float64) error {
@@ -307,8 +310,8 @@ func (m *MultiChannelLogger) LogGroupComplete(groupName string, passed, failed i
 	// Log to verbose system
 	m.verboseLogger.LogInfo("Completed %s group: %d passed, %d failed (%.1fs)", groupName, passed, failed, duration)
 
-	// Log to frontend system
-	return m.frontendLogger.LogGroupComplete(groupName, passed, failed, duration)
+	// Log to HTTP logger system
+	return m.httpLogger.LogGroupComplete(groupName, passed, failed, duration)
 }
 
 // Subgroup level logging methods
@@ -322,8 +325,8 @@ func (m *MultiChannelLogger) LogSubgroupStart(subgroupName string, testsInSubgro
 	m.verboseLogger.LogInfo("Starting %s subgroup (%d/%d)", subgroupName, subgroupNumber, totalSubgroups)
 	m.verboseLogger.LogInfo("Tests in subgroup: %d", testsInSubgroup)
 
-	// Log to frontend system
-	return m.frontendLogger.LogSubgroupStart(subgroupName, testsInSubgroup, subgroupNumber, totalSubgroups)
+	// Log to HTTP logger system
+	return m.httpLogger.LogSubgroupStart(subgroupName, testsInSubgroup, subgroupNumber, totalSubgroups)
 }
 
 func (m *MultiChannelLogger) LogSubgroupComplete(subgroupName string, passed, failed int, duration float64) error {
@@ -333,8 +336,8 @@ func (m *MultiChannelLogger) LogSubgroupComplete(subgroupName string, passed, fa
 	// Log to verbose system
 	m.verboseLogger.LogInfo("Completed %s subgroup: %d passed, %d failed (%.1fs)", subgroupName, passed, failed, duration)
 
-	// Log to frontend system
-	return m.frontendLogger.LogSubgroupComplete(subgroupName, passed, failed, duration)
+	// Log to HTTP logger system
+	return m.httpLogger.LogSubgroupComplete(subgroupName, passed, failed, duration)
 }
 
 // Test level logging methods
@@ -359,8 +362,8 @@ func (m *MultiChannelLogger) LogTestStart(testName string, testNumber, totalTest
 	m.verboseLogger.SetContext(testName)
 	m.verboseLogger.LogInfo("Starting test %d/%d: %s (subgroup: %s)", testNumber, totalTests, testName, subgroup)
 
-	// Log to frontend system
-	return m.frontendLogger.LogTestStart(testName, testNumber, totalTests, subgroup)
+	// Log to HTTP logger system
+	return m.httpLogger.LogTestStart(testName, testNumber, totalTests, subgroup)
 }
 
 func (m *MultiChannelLogger) LogTestComplete(testName string, testNumber, totalTests int, success bool, duration float64, message string) error {
@@ -380,8 +383,8 @@ func (m *MultiChannelLogger) LogTestComplete(testName string, testNumber, totalT
 	}
 	m.verboseLogger.LogInfo("Test %d/%d %s: %s (%.1fs) - %s", testNumber, totalTests, status, testName, duration, message)
 
-	// Log to frontend system - use legacy method for compatibility
-	return m.frontendLogger.LogTestCompleteWithHierarchy(testName, testNumber, totalTests, success, duration, message, m.currentHierarchy)
+	// Log to HTTP logger system - use legacy method for compatibility
+	return m.httpLogger.LogTestCompleteWithHierarchy(testName, testNumber, totalTests, success, duration, message, m.currentHierarchy)
 }
 
 func (m *MultiChannelLogger) LogTestError(testName string, testNumber int, errorMsg, stage string, retryable bool) error {
@@ -391,8 +394,8 @@ func (m *MultiChannelLogger) LogTestError(testName string, testNumber int, error
 	// Log to verbose system
 	m.verboseLogger.LogError("Test %d ERROR (%s): %s - %s (retryable: %t)", testNumber, stage, testName, errorMsg, retryable)
 
-	// Log to frontend system
-	return m.frontendLogger.LogTestError(testName, testNumber, errorMsg, stage, retryable)
+	// Log to HTTP logger system
+	return m.httpLogger.LogTestError(testName, testNumber, errorMsg, stage, retryable)
 }
 
 func (m *MultiChannelLogger) LogTestRetry(testName string, attempt, maxAttempts int, reason string) error {
@@ -402,8 +405,8 @@ func (m *MultiChannelLogger) LogTestRetry(testName string, attempt, maxAttempts 
 	// Log to verbose system
 	m.verboseLogger.LogWarning("Retrying %s (attempt %d/%d): %s", testName, attempt, maxAttempts, reason)
 
-	// Log to frontend system
-	return m.frontendLogger.LogTestRetry(testName, attempt, maxAttempts, reason)
+	// Log to HTTP logger system
+	return m.httpLogger.LogTestRetry(testName, attempt, maxAttempts, reason)
 }
 
 // Operation level logging methods
@@ -423,8 +426,8 @@ func (m *MultiChannelLogger) LogStep(stepName, message string, step, totalSteps 
 	// Log to verbose system (file only)
 	m.verboseLogger.LogInfo("Step %d/%d (%s): %s", step, totalSteps, stepName, message)
 
-	// Log to frontend system
-	return m.frontendLogger.LogStep(stepName, message, step, totalSteps, "in_progress")
+	// Log to HTTP logger system
+	return m.httpLogger.LogStep(stepName, message, step, totalSteps, "in_progress")
 }
 
 func (m *MultiChannelLogger) LogStepName(stepName, message string) error {
@@ -437,8 +440,8 @@ func (m *MultiChannelLogger) LogStepName(stepName, message string) error {
 	// Log to verbose system (file only)
 	m.verboseLogger.LogInfo("%s: %s", stepName, message)
 
-	// Log to frontend system
-	return m.frontendLogger.LogStep(stepName, message, 0, 0, "in_progress")
+	// Log to HTTP logger system
+	return m.httpLogger.LogStep(stepName, message, 0, 0, "in_progress")
 }
 
 func (m *MultiChannelLogger) LogStepComplete(stepName string, success bool, message string) error {
@@ -461,8 +464,8 @@ func (m *MultiChannelLogger) LogStepComplete(stepName string, success bool, mess
 	}
 	m.verboseLogger.LogInfo("Step %s: %s - %s", status, stepName, message)
 
-	// Log to frontend system using new LogStepComplete method (triggers immediate flush)
-	return m.frontendLogger.LogStepComplete(stepName, success, message)
+	// Log to HTTP logger system using new LogStepComplete method (triggers immediate flush)
+	return m.httpLogger.LogStepComplete(stepName, success, message)
 }
 
 func (m *MultiChannelLogger) LogCommand(command, workingDir string) (string, error) {
@@ -480,8 +483,8 @@ func (m *MultiChannelLogger) LogCommand(command, workingDir string) (string, err
 		}
 	}
 
-	// Log to frontend system
-	err := m.frontendLogger.LogCommand(command, cmdID, workingDir)
+	// Log to HTTP logger system
+	err := m.httpLogger.LogCommand(command, cmdID, workingDir)
 
 	return cmdID, err
 }
@@ -503,8 +506,8 @@ func (m *MultiChannelLogger) LogCommandResult(cmdID string, exitCode int, durati
 		)
 	}
 
-	// Log to frontend system
-	return m.frontendLogger.LogCommandResult(cmdID, exitCode, duration, stdout, stderr, success)
+	// Log to HTTP logger system
+	return m.httpLogger.LogCommandResult(cmdID, exitCode, duration, stdout, stderr, success)
 }
 
 func (m *MultiChannelLogger) LogCleanup(operation string, resources []string) error {
@@ -514,8 +517,8 @@ func (m *MultiChannelLogger) LogCleanup(operation string, resources []string) er
 	// Log to verbose system
 	m.verboseLogger.LogInfo("Cleanup operation: %s (resources: %v)", operation, resources)
 
-	// Log to frontend system
-	return m.frontendLogger.LogCleanup(operation, resources)
+	// Log to HTTP logger system
+	return m.httpLogger.LogCleanup(operation, resources)
 }
 
 func (m *MultiChannelLogger) LogAPICall(method, endpoint string, duration float64, statusCode int) error {
@@ -525,8 +528,8 @@ func (m *MultiChannelLogger) LogAPICall(method, endpoint string, duration float6
 	// Log to verbose system
 	m.verboseLogger.LogDebug("API call: %s %s -> %d (%.3fs)", method, endpoint, statusCode, duration)
 
-	// Log to frontend system
-	return m.frontendLogger.LogAPICall(method, endpoint, duration, statusCode)
+	// Log to HTTP logger system
+	return m.httpLogger.LogAPICall(method, endpoint, duration, statusCode)
 }
 
 // Additional logging methods for tests
@@ -614,6 +617,15 @@ func (m *MultiChannelLogger) LogError(message string, args ...interface{}) error
 	return nil
 }
 
+// LogSimpleStatus prints clean terminal messages without timestamps or formatting
+func (m *MultiChannelLogger) LogSimpleStatus(message string) {
+	// Always output to console directly, regardless of verboseLogger's console setting
+	fmt.Println(message)
+
+	// Also log to verbose logger for file logging (if enabled)
+	m.verboseLogger.LogInfo("SIMPLE_STATUS: %s", message)
+}
+
 // Hierarchy management methods
 
 func (m *MultiChannelLogger) SetHierarchyContext(hierarchy *HierarchyContext) {
@@ -690,10 +702,18 @@ func (m *MultiChannelLogger) GetVerboseLogger() *Logger {
 	return m.verboseLogger
 }
 
-func (m *MultiChannelLogger) GetFrontendLogger() *FrontendJSONLogger {
+func (m *MultiChannelLogger) GetHTTPLogger() *HTTPLogger {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.frontendLogger
+	return m.httpLogger
+}
+
+// GetFrontendLogger provides backward compatibility - redirects to HTTPLogger
+// This method should be deprecated and replaced with GetHTTPLogger()
+func (m *MultiChannelLogger) GetFrontendLogger() *HTTPLogger {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.httpLogger
 }
 
 // Close closes all logging channels
@@ -708,9 +728,9 @@ func (m *MultiChannelLogger) Close() error {
 		errs = append(errs, fmt.Errorf("verbose logger close error: %v", err))
 	}
 
-	// Close frontend logger
-	if err := m.frontendLogger.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("frontend logger close error: %v", err))
+	// Close HTTP logger
+	if err := m.httpLogger.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("HTTP logger close error: %v", err))
 	}
 
 	// Return first error if any occurred

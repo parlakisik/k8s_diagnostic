@@ -58,6 +58,16 @@ type HierarchyContext struct {
 	Phase      string `json:"phase,omitempty"`
 }
 
+// UserMessage represents user-friendly messaging content
+type UserMessage struct {
+	Phase       string   `json:"phase"`       // "environment", "setup", "execution", "result"
+	Status      string   `json:"status"`      // "success", "failure", "warning", "progress"
+	Title       string   `json:"title"`       // User-friendly title
+	Description string   `json:"description"` // What happened
+	Context     string   `json:"context"`     // What this means for their cluster
+	Hints       []string `json:"hints"`       // Actionable next steps
+}
+
 // FrontendLogEntry represents a single log entry in JSON Lines format
 type FrontendLogEntry struct {
 	Timestamp time.Time              `json:"timestamp"`
@@ -174,6 +184,95 @@ func (f *FrontendJSONLogger) LogEntryWithHierarchy(level FrontendLogLevel, event
 		Type:      eventType,
 		Context:   f.context,
 		Message:   message,
+		Data:      data,
+	}
+
+	// Add hierarchy information if provided
+	if hierarchy != nil {
+		entry.GroupId = hierarchy.GroupId
+		entry.SubgroupId = hierarchy.SubgroupId
+		entry.TestId = hierarchy.TestId
+		entry.Phase = hierarchy.Phase
+	}
+
+	return f.writeDirectlyToDisk(entry)
+}
+
+// LogUserStep logs a dual-purpose entry with both user-friendly messages and technical details
+// This is the core method for enhanced user feedback while preserving customer service diagnostics
+func (f *FrontendJSONLogger) LogUserStep(phase, status, title, description, context string, hints []string, technicalData map[string]interface{}) error {
+	// Determine appropriate log level from status
+	level := FrontendLevelInfo
+	switch status {
+	case "success":
+		level = FrontendLevelSuccess
+	case "failure":
+		level = FrontendLevelError
+	case "warning":
+		level = FrontendLevelWarning
+	case "progress":
+		level = FrontendLevelInfo
+	}
+
+	// Create the dual-purpose data structure
+	data := map[string]interface{}{
+		"userMessage": UserMessage{
+			Phase:       phase,
+			Status:      status,
+			Title:       title,
+			Description: description,
+			Context:     context,
+			Hints:       hints,
+		},
+		"technicalDetails": technicalData,
+	}
+
+	entry := FrontendLogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Type:      EventStep,
+		Context:   f.context,
+		Message:   title, // Technical message for customer service logs
+		Data:      data,
+	}
+
+	return f.writeDirectlyToDisk(entry)
+}
+
+// LogUserStepWithHierarchy logs a dual-purpose entry with hierarchy context
+func (f *FrontendJSONLogger) LogUserStepWithHierarchy(phase, status, title, description, context string, hints []string, technicalData map[string]interface{}, hierarchy *HierarchyContext) error {
+	// Determine appropriate log level from status
+	level := FrontendLevelInfo
+	switch status {
+	case "success":
+		level = FrontendLevelSuccess
+	case "failure":
+		level = FrontendLevelError
+	case "warning":
+		level = FrontendLevelWarning
+	case "progress":
+		level = FrontendLevelInfo
+	}
+
+	// Create the dual-purpose data structure
+	data := map[string]interface{}{
+		"userMessage": UserMessage{
+			Phase:       phase,
+			Status:      status,
+			Title:       title,
+			Description: description,
+			Context:     context,
+			Hints:       hints,
+		},
+		"technicalDetails": technicalData,
+	}
+
+	entry := FrontendLogEntry{
+		Timestamp: time.Now(),
+		Level:     level,
+		Type:      EventStep,
+		Context:   f.context,
+		Message:   title, // Technical message for customer service logs
 		Data:      data,
 	}
 
@@ -432,6 +531,7 @@ func (f *FrontendJSONLogger) LogTemplateVariableDiscovery(templateVars *Template
 		"DNS_SERVER1":                templateVars.DNSServer1,
 		"DNS_SERVER2":                templateVars.DNSServer2,
 		"API_DOMAIN":                 templateVars.APIDomain,
+		"API_V2_DOMAIN":              templateVars.APIV2Domain,
 		"CILIUM_DOMAIN_WILDCARD":     templateVars.CiliumDomainWildcard,
 		"GITHUB_DOMAIN_WILDCARD":     templateVars.GithubDomainWildcard,
 		"DOCKER_DOMAIN_WILDCARD":     templateVars.DockerDomainWildcard,

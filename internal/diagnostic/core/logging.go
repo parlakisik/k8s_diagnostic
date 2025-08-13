@@ -221,6 +221,13 @@ func (l *Logger) Close() error {
 	return nil
 }
 
+// LogSimpleStatus prints clean terminal messages without timestamps or formatting
+func (l *Logger) LogSimpleStatus(message string) {
+	if l.consoleOutput {
+		fmt.Println(message)
+	}
+}
+
 // CaptureCommandOutput is a helper function to capture command execution details
 func (l *Logger) CaptureCommandOutput(cmdOutput CommandOutput) {
 	l.LogCommandExecution(
