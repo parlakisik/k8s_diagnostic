@@ -156,15 +156,8 @@ func CloseCommandLogger() error {
 		return nil
 	}
 
-	// PHASE 7B: Force final flush before closing to ensure all events are written
-	if commandLoggerInstance.multiChannelLogger != nil {
-		frontendLogger := commandLoggerInstance.multiChannelLogger.GetFrontendLogger()
-		if frontendLogger != nil {
-			if flushErr := frontendLogger.flushBuffer(); flushErr != nil {
-				fmt.Printf("Warning: Final JSONL flush failed: %v\n", flushErr)
-			}
-		}
-	}
+	// HTTPLogger processes events asynchronously and will flush on close
+	// No manual flush needed as the Close() method handles this
 
 	err := commandLoggerInstance.close()
 	commandLoggerInstance = nil
