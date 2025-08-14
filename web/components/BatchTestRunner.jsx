@@ -29,7 +29,6 @@ const getTestColorClass = (testName) => {
                (testName?.name || testName?.testName || String(testName || ''));
   
   if (!name || typeof name !== 'string') {
-    console.warn('[BatchTestRunner] Invalid testName passed to getTestColorClass:', testName);
     return 'test-card-infrastructure'; // fallback color
   }
   
@@ -88,7 +87,6 @@ const getTestIcon = (testName) => {
                (testName?.name || testName?.testName || String(testName || ''));
   
   if (!name || typeof name !== 'string') {
-    console.warn('[BatchTestRunner] Invalid testName passed to getTestIcon:', testName);
     return '⚙️'; // fallback icon
   }
   
@@ -113,7 +111,6 @@ const getSkeletonColor = (testName) => {
                (testName?.name || testName?.testName || String(testName || ''));
   
   if (!name || typeof name !== 'string') {
-    console.warn('[BatchTestRunner] Invalid testName passed to getSkeletonColor:', testName);
     return 'bg-teal-400'; // fallback color
   }
   
@@ -172,7 +169,6 @@ const getTestCategory = (testName) => {
                (testName?.name || testName?.testName || String(testName || ''));
   
   if (!name || typeof name !== 'string') {
-    console.warn('[BatchTestRunner] Invalid testName passed to getTestCategory:', testName);
     return 'Infrastructure Test'; // fallback category
   }
   
@@ -350,7 +346,16 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     
     if (trimmed.includes('universal_cleanup completed') || 
         trimmed.includes('Cleanup completed successfully')) {
-      const newMessage = '✅ Post Test Cleanup COMPLETED';
+      
+      // CRITICAL FIX: Context-aware cleanup completion mapping
+      // Determine if we're in pre-test or post-test cleanup based on actual test execution state
+      const hasTestsStarted = currentlyRunning.size > 0 || 
+                             Object.values(testResults).some(r => ['success', 'failed', 'running'].includes(r.status));
+      
+      const newMessage = hasTestsStarted ? 
+        '✅ Post Test Cleanup COMPLETED' :     // After tests have actually run
+        '✅ Pre-test cleanup completed';       // Before tests have started
+        
       if (lastPhaseMessageRef.current !== newMessage) {
         lastPhaseMessageRef.current = newMessage;
         return newMessage;
@@ -413,7 +418,15 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       return;
     }
 
-    const selectedTestsList = Array.from(selectedTests);
+    // CRITICAL FIX: Preserve original testQueue order for execution
+    // Filter testQueue to only include selected tests, maintaining original order
+    const selectedTestsList = testQueue
+      .map(testName => typeof testName === 'string' ? testName : 
+           (testName?.name || testName?.testName || String(testName || 'unknown-test')))
+      .filter(testName => selectedTests.has(testName));
+    
+    console.log('[BatchTestRunner] 🚀 Starting batch execution with test queue:', selectedTestsList);
+    console.log('[BatchTestRunner] 📋 Original testQueue order preserved - tests will run in selection order');
     const newTestId = Date.now().toString();
     setTestId(newTestId);
     setIsRunning(true);
@@ -450,7 +463,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (cleanupError) {
-      console.warn('[BatchTestRunner] ⚠️ Failed to clear server events (non-critical):', cleanupError);
+      // Silent cleanup error handling
     }
 
     // Initialize test states for selected tests only
@@ -477,7 +490,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('[BatchTestRunner] API error response:', errorData);
         throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || 'Unknown error'}`);
       }
 
@@ -507,14 +519,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               const eventData = JSON.parse(line.substring(6));
               handleTestEvent(eventData);
             } catch (parseError) {
-              console.error('[BatchTestRunner] Failed to parse SSE event:', parseError);
+              // Silent parse error handling
             }
           }
         }
       }
 
     } catch (err) {
-      console.error('[BatchTestRunner] Batch test execution error:', err);
       setError(`Failed to execute batch tests: ${err.message}`);
       setIsRunning(false);
       setIsLoading(false); // CRITICAL: Reset loading state on error
@@ -528,8 +539,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const stopAllTests = async () => {
-    console.log('[BatchTestRunner] STOP button clicked - terminating all tests');
-    
     // 🎯 IMMEDIATE: Hide modal instantly for immediate user feedback
     setIsRunning(false);
     setCurrentlyRunning(new Set());
@@ -547,8 +556,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       });
 
       if (response.ok) {
-        console.log('[BatchTestRunner] Stop signal sent successfully');
-        
         // 🛡️ FIXED: Use atomic state updates for termination
         setTestResults(prev => {
           const updated = { ...prev };
@@ -565,16 +572,12 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         
         setOverallProgress(100);
         stopStatusPolling();
-        
-        console.log('[BatchTestRunner] ✅ All tests terminated successfully');
       } else {
-        console.error('[BatchTestRunner] Failed to stop tests:', response.status);
         setError('Failed to stop tests - they may continue running');
         // 🛡️ FIXED: Ensure modal stays hidden even if API fails
         setIsRunning(false);
       }
     } catch (err) {
-      console.error('[BatchTestRunner] Error stopping tests:', err);
       setError(`Failed to stop tests: ${err.message}`);
       // 🛡️ FIXED: Ensure modal stays hidden even on exceptions
       setIsRunning(false);
@@ -593,7 +596,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const calculateProgress = (testResults, totalTests) => {
     // 🔒 MUTEX PROTECTION: Prevent concurrent progress calculations
     if (progressMutex.current) {
-      console.warn(`[BatchTestRunner] 🔒 Progress calculation blocked - mutex active`);
       return lastValidProgress.current;
     }
     
@@ -630,8 +632,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       
       // 🛡️ CRITICAL VALIDATION: Detect impossible state combinations
       if (totalCompleted > totalTests) {
-        console.error(`[BatchTestRunner] 🚨 CRITICAL STATE CORRUPTION: completed (${totalCompleted}) > total (${totalTests})`);
-        console.error(`[BatchTestRunner] 🔍 State breakdown:`, statusCounts);
         return lastValidProgress.current; // Return last known good progress
       }
       
@@ -662,18 +662,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       const isValidProgression = rounded >= currentProgress || isResetScenario;
       
       if (isBackwardMovement && !isResetScenario) {
-        console.warn(`[BatchTestRunner] 🛑 BLOCKED: Progress backward movement ${currentProgress}% → ${rounded}%`);
-        console.warn(`[BatchTestRunner] 🔍 Validation: completed=${totalCompleted}/${totalTests}, states=`, statusCounts);
         return currentProgress;
       }
       
       // 🛡️ CRITICAL: Update last valid progress atomically
       lastValidProgress.current = rounded;
       
-      // Log significant changes for monitoring
-      if (Math.abs(rounded - currentProgress) >= 10 || rounded === 100 || rounded === 0) {
-        console.log(`[BatchTestRunner] 📊 VALIDATED progress change: ${currentProgress}% → ${rounded}% (${totalCompleted}/${totalTests})`);
-      }
+      // Log significant changes for monitoring (removed)
       
       return rounded;
       
@@ -724,7 +719,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const testStateHistory = useRef(new Map()); // testName -> array of state transitions for debugging
   const eventTimestamps = useRef(new Map()); // testName -> last event timestamp to prevent out-of-order processing
 
-  // 🔒 ENHANCED: State transition validation with stricter rules
+  // 🔒 ENHANCED: State transition validation with stale result detection
   const isValidStateTransition = (testName, currentStatus, newStatus) => {
     // Define valid state transitions with stricter rules
     const validTransitions = {
@@ -734,12 +729,17 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       'running': ['success', 'failed', 'terminated'],
       'success': [], // Final state - no transitions allowed
       'failed': [], // Final state - no transitions allowed  
-      'terminated': [] // Final state - no transitions allowed
+      'terminated': [] // Final state - no transitions allowed to prevent stale results
     };
 
-    // Special case: prevent overwriting completed states
-    if (['success', 'failed', 'terminated'].includes(currentStatus)) {
-      console.warn(`[BatchTestRunner] 🛑 BLOCKED: Attempt to overwrite final state ${currentStatus} → ${newStatus} for ${testName}`);
+    // CRITICAL FIX: Block ALL backend results after user termination (tests are sequential - later tests never ran)
+    if (currentStatus === 'terminated' && ['success', 'failed'].includes(newStatus)) {
+      console.log(`[BatchTestRunner] 🛑 STALE RESULT BLOCKED: Ignoring backend ${newStatus} for ${testName} - tests are sequential, this test never ran after user termination`);
+      return false;
+    }
+
+    // Special case: prevent overwriting completed states (except termination override above)
+    if (['success', 'failed'].includes(currentStatus)) {
       return false;
     }
 
@@ -747,9 +747,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     const isValid = allowed.includes(newStatus);
     
     if (!isValid) {
-      console.warn(`[BatchTestRunner] 🛑 INVALID STATE TRANSITION blocked: ${testName} ${currentStatus} → ${newStatus}`);
-      
-      // Record invalid transition attempt for debugging
+      // Record invalid transition attempt for debugging (no console spam)
       const history = testStateHistory.current.get(testName) || [];
       history.push({
         timestamp: Date.now(),
@@ -882,7 +880,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         });
         testStateHistory.current.set(testName, history.slice(-20)); // Keep more history
         
-        console.log(`[BatchTestRunner] ✅ ATOMIC STATE UPDATE: ${testName} ${currentStatus} → ${newStatus} [${id}]`);
         success = true;
         
         const newState = {
@@ -903,7 +900,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     });
     
     if (transitionBlocked) {
-      console.warn(`[BatchTestRunner] 🛑 BLOCKED TRANSITION: ${id} - Invalid state transition blocked`);
       return false;
     }
     
@@ -911,7 +907,10 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const handleTestEvent = async (eventData) => {
-    const testName = eventData.testName || eventData.data?.testName;
+    // CRITICAL FIX: Ensure testName is always converted to string early to prevent object propagation
+    const rawTestName = eventData.testName || eventData.data?.testName;
+    const testName = typeof rawTestName === 'string' ? rawTestName : 
+                     (rawTestName?.name || rawTestName?.testName || String(rawTestName || 'unknown-test'));
     const eventTimestamp = eventData.timestamp || Date.now();
     
     // 🛡️ ENHANCED: Advanced event deduplication with collision prevention
@@ -1028,6 +1027,9 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
             userMessage: eventData.userMessage
           };
           
+          // Add the clean test completion log
+          console.log(`[BatchTestRunner] ${completionData.success ? '✅' : '❌'} Test completed: ${testName} - ${completionData.success ? 'PASSED' : 'FAILED'}`);
+          
           // 🛡️ ENHANCED: Use async atomic state update for completion with double-check
           const newStatus = completionData.success ? 'success' : 'failed';
           const success = await updateTestStateAtomic(testName, newStatus, completionData.summary, {
@@ -1044,9 +1046,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               // Ensure test is actually in the set before removing
               if (newSet.has(testName)) {
                 newSet.delete(testName);
-                console.log('[BatchTestRunner] 📊 Removed from currentlyRunning:', testName, 'Remaining:', Array.from(newSet));
-              } else {
-                console.log('[BatchTestRunner] ℹ️ Test not in currentlyRunning set:', testName);
               }
               
               return newSet;
@@ -1063,8 +1062,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   // Additional validation: ensure progress doesn't exceed 100%
                   const validatedProgress = Math.min(100, Math.max(0, newProgress));
                   setOverallProgress(validatedProgress);
-                  
-                  console.log(`[BatchTestRunner] 📊 Progress updated: ${validatedProgress}% (${testName} completed)`);
                 }
                 return currentResults;
               });
@@ -1216,8 +1213,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Initialize empty test states and cleanup on unmount
   useEffect(() => {
-    console.log('[BatchTestRunner] Component mounted - ready to run tests');
-    
     // Initialize skeleton test states for display
     const initialResults = {};
     const initialOutputs = {};
@@ -1235,13 +1230,11 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Update selectedTests when testQueue changes
   useEffect(() => {
-    console.log('[BatchTestRunner] DEBUG: testQueue changed:', testQueue);
     // Extract string names from potential objects in testQueue
     const testNameStrings = testQueue.map(testName => 
       typeof testName === 'string' ? testName : 
       (testName?.name || testName?.testName || String(testName || 'unknown-test'))
     );
-    console.log('[BatchTestRunner] DEBUG: extracted test names:', testNameStrings);
     setSelectedTests(new Set(testNameStrings));
   }, [testQueue]);
 
@@ -1449,10 +1442,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Generate rich terminated display format for user-stopped tests
   const generateRichTerminatedDisplay = (testName, result) => {
+    // CRITICAL FIX: Ensure testName is always a string to prevent "[object Object]" display
+    const testNameString = typeof testName === 'string' ? testName : 
+                           (testName?.name || testName?.testName || String(testName || 'unknown-test'));
     const duration = result.duration || '0';
     
     return {
-      mainStatus: `🛑 ${testName} test terminated (${duration}s)`,
+      mainStatus: `🛑 ${testNameString} test terminated (${duration}s)`,
       details: [
         `📋 Test execution was stopped by user request`,
         `🔄 No diagnostic issues - test was manually terminated`,
@@ -1880,9 +1876,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                 )}
                 
                 {result.status === 'success' && (() => {
-                  console.log('[BatchTestRunner] 🎯 Rendering SUCCESS for:', testName, 'Result:', result);
                   const richDisplay = generateRichSuccessDisplay(testName, result);
-                  console.log('[BatchTestRunner] 🎨 Rich display generated:', richDisplay);
                   return (
                     <div className="text-green-600">
                       <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4', marginTop: '10px' }}>
@@ -1995,7 +1989,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               <div className="font-poppins font-bold text-blue-600 flex items-center justify-center">
                 <span className="text-xl" style={{ marginRight: '10px' }}>📊</span>
                 <span className="text-2xl" style={{ marginRight: '10px' }}>
-                  {testQueue.length}
+                  {selectedTests.size}
                 </span>
                 <span className="text-sm">Total Tests</span>
               </div>
