@@ -1,0 +1,19 @@
+FROM alpine:latest
+
+# Install kubectl and basic utilities
+RUN apk --no-cache add curl ca-certificates && \
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+
+WORKDIR /app
+
+# Copy the pre-built Linux binary (built by Makefile)
+COPY build/k8s-diagnostic-linux-amd64 ./k8s-diagnostic
+RUN chmod +x ./k8s-diagnostic
+
+# Move to project root and create required directories
+WORKDIR /app/shared/repository
+RUN mkdir -p test_results/logs
+
+ENTRYPOINT ["/app/k8s-diagnostic"]

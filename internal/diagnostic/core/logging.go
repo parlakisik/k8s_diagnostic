@@ -60,8 +60,8 @@ func NewLoggerWithLevel(consoleOutput bool, level LogLevel) (*Logger, error) {
 
 // NewLoggerWithSharedTimestamp creates a logger with a shared timestamp for consistent file naming
 func NewLoggerWithSharedTimestamp(sharedTime *SharedTimestamp, consoleOutput bool, level LogLevel) (*Logger, error) {
-	// Create test_results/logs directory if it doesn't exist
-	logsDir := "test_results/logs"
+	// Use shared volume path if available
+	logsDir := getSharedPath("test_results/logs")
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %v", err)
 	}
@@ -241,4 +241,12 @@ func (l *Logger) CaptureCommandOutput(cmdOutput CommandOutput) {
 	if cmdOutput.ExitCode != 0 {
 		l.LogError("Command failed: %s (exit code %d)", cmdOutput.Command, cmdOutput.ExitCode)
 	}
+}
+
+// getSharedPath returns the shared volume path if available, otherwise returns the original path
+func getSharedPath(relativePath string) string {
+	if sharedDir := os.Getenv("SHARED_VOLUME_PATH"); sharedDir != "" {
+		return filepath.Join(sharedDir, "repository", relativePath)
+	}
+	return relativePath // Local development
 }

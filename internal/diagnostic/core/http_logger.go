@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -41,18 +42,22 @@ type HTTPLogger struct {
 
 // NewHTTPLogger creates a new HTTP logger that posts to the API
 func NewHTTPLogger(testID string) (*HTTPLogger, error) {
+	apiURL := getAPIURL()
+
 	logger := &HTTPLogger{
-		apiURL:     "http://localhost:3000/api/log-events",
+		apiURL:     apiURL,
 		client:     &http.Client{Timeout: 5 * time.Second},
 		testID:     testID,
-		enabled:    true,
+		enabled:    apiURL != "",                  // Only enabled if API URL is configured
 		eventQueue: make(chan HTTPLogEvent, 1000), // Buffer up to 1000 events
 		stopQueue:  make(chan bool, 1),
 	}
 
-	// Start background worker to process events
-	logger.wg.Add(1)
-	go logger.eventWorker()
+	// Only start background worker if API URL is configured
+	if apiURL != "" {
+		logger.wg.Add(1)
+		go logger.eventWorker()
+	}
 
 	return logger, nil
 }
@@ -74,7 +79,7 @@ func (h *HTTPLogger) eventWorker() {
 			return
 		case <-time.After(30 * time.Second):
 			// Periodic health check - send a heartbeat if no events for 30 seconds
-			if h.enabled {
+			if h.enabled && h.apiURL != "" {
 				heartbeat := HTTPLogEvent{
 					TestID:    h.testID,
 					Type:      "heartbeat",
@@ -118,10 +123,11 @@ func (h *HTTPLogger) sendEvent(event HTTPLogEvent) {
 func (h *HTTPLogger) sendEventSync(event HTTPLogEvent) {
 	h.mu.RLock()
 	enabled := h.enabled
+	apiURL := h.apiURL
 	h.mu.RUnlock()
 
-	if !enabled {
-		return
+	if !enabled || apiURL == "" {
+		return // Skip if disabled or no API URL configured
 	}
 
 	jsonData, err := json.Marshal(event)
@@ -133,7 +139,7 @@ func (h *HTTPLogger) sendEventSync(event HTTPLogEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", h.apiURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Printf("Error creating request: %v\n", err)
 		h.disableOnError()
@@ -589,15 +595,38 @@ func (h *HTTPLogger) GetLogFilePath() string { return "" }
 
 // Close stops the event worker and cleans up
 func (h *HTTPLogger) Close() error {
-	// Signal worker to stop
-	h.stopQueue <- true
+	// Only signal worker if it was started (i.e., if apiURL is configured)
+	if h.apiURL != "" {
+		// Signal worker to stop
+		h.stopQueue <- true
 
-	// Wait for worker to finish
-	h.wg.Wait()
+		// Wait for worker to finish
+		h.wg.Wait()
+	}
 
 	// Close channels
 	close(h.eventQueue)
 	close(h.stopQueue)
 
 	return nil
+}
+
+// getAPIURL returns the API URL based on environment variables or empty string to disable HTTP logging
+func getAPIURL() string {
+	if url := os.Getenv("HTTP_LOG_URL"); url != "" {
+		return url + "/api/log-events"
+	}
+	return "" // Return empty string to disable HTTP logging when not explicitly configured
+}
+
+// NewNoOpHTTPLogger creates a minimal no-op HTTP logger for standalone mode
+func NewNoOpHTTPLogger() *HTTPLogger {
+	return &HTTPLogger{
+		apiURL:     "",
+		client:     nil,
+		testID:     "noop",
+		enabled:    false,
+		eventQueue: make(chan HTTPLogEvent, 1), // Minimal buffer
+		stopQueue:  make(chan bool, 1),
+	}
 }

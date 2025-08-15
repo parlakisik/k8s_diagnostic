@@ -1,0 +1,75 @@
+services:
+  # Web UI - orchestrates tests by spawning CLI containers via Docker Compose
+  k8s-diagnostic-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./cmd:/app/shared/repository/cmd:ro
+      - ./internal:/app/shared/repository/internal:ro
+      - ./cilium-policies:/app/shared/repository/cilium-policies:ro
+      - ./build:/app/shared/repository/build:ro
+      - ./go.mod:/app/shared/repository/go.mod:ro
+      - ./go.sum:/app/shared/repository/go.sum:ro
+      - ./main.go:/app/shared/repository/main.go:ro
+      - ./test_results:/app/shared/repository/test_results
+      - ~/.kube:/app/shared/.kube:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=production
+      - SHARED_VOLUME_PATH=/app/shared
+    networks:
+      - k8s-diagnostic
+
+  # CLI container for UI integration - uses bridge networking
+  k8s-diagnostic-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli-simple
+    volumes:
+      - ./cmd:/app/shared/repository/cmd:ro
+      - ./internal:/app/shared/repository/internal:ro
+      - ./cilium-policies:/app/shared/repository/cilium-policies:ro
+      - ./build:/app/shared/repository/build:ro
+      - ./go.mod:/app/shared/repository/go.mod:ro
+      - ./go.sum:/app/shared/repository/go.sum:ro
+      - ./main.go:/app/shared/repository/main.go:ro
+      - ./test_results:/app/shared/repository/test_results
+      - ~/.kube:/app/shared/.kube:ro
+    environment:
+      - KUBECONFIG=/app/shared/.kube/config
+      - SHARED_VOLUME_PATH=/app/shared
+      - HTTP_LOG_URL=http://k8s-diagnostic-ui:3000
+      - DISABLE_AUTO_REBUILD=true
+    networks:
+      - k8s-diagnostic
+    profiles: ["cli"]
+
+  # CLI container for standalone usage - uses host networking for kind cluster access
+  k8s-diagnostic-cli-standalone:
+    build:
+      context: .
+      dockerfile: Dockerfile.cli-simple
+    volumes:
+      - ./cmd:/app/shared/repository/cmd:ro
+      - ./internal:/app/shared/repository/internal:ro
+      - ./cilium-policies:/app/shared/repository/cilium-policies:ro
+      - ./build:/app/shared/repository/build:ro
+      - ./go.mod:/app/shared/repository/go.mod:ro
+      - ./go.sum:/app/shared/repository/go.sum:ro
+      - ./main.go:/app/shared/repository/main.go:ro
+      - ./test_results:/app/shared/repository/test_results
+      - ~/.kube:/app/shared/.kube:ro
+    environment:
+      - KUBECONFIG=/app/shared/.kube/config
+      - SHARED_VOLUME_PATH=/app/shared
+      - DISABLE_AUTO_REBUILD=true
+      - DOCKER_CONTAINER=true
+    network_mode: host
+    profiles: ["cli-standalone"]
+
+networks:
+  k8s-diagnostic:
+    driver: bridge

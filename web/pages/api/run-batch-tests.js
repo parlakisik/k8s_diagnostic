@@ -8,163 +8,67 @@ let activeTestProcesses = new Map(); // Track individual test processes: testNam
 let testStateSync = new Map(); // Synchronize test states with frontend: testId -> { testStates, lastUpdate }
 let processLocks = new Map(); // Prevent concurrent process operations: testId -> Promise
 
-// Auto-build functionality - similar to CLI ensureBinaryIsUpToDate()
-async function ensureBinaryIsUpToDate(projectRoot, res, testId) {
-  const binaryPath = path.join(projectRoot, 'k8s_diagnostic');
-  
+// Docker availability check - no binary building needed
+async function ensureDockerIsAvailable(projectRoot, res, testId) {
   try {
-    // Check if binary exists
-    const binaryStats = await fs.promises.stat(binaryPath).catch(() => null);
+    console.log(`[BATCH API] Checking Docker Compose availability...`);
+    res.write(`data: ${JSON.stringify({
+      type: 'build_start',
+      message: '🐳 Preparing Docker containers...',
+      testId: testId
+    })}\n\n`);
     
-    if (!binaryStats) {
-      // Binary doesn't exist, need to build
-      console.log(`[BATCH API] Binary not found at ${binaryPath}, building...`);
-      res.write(`data: ${JSON.stringify({
-        type: 'build_start',
-        message: '🔨 Binary not found, building k8s_diagnostic...',
-        testId: testId
-      })}\n\n`);
+    // Check if docker compose is available
+    const dockerProcess = spawn('docker', ['compose', 'version'], {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    
+    return new Promise((resolve) => {
+      let output = '';
+      let error = '';
       
-      return await buildBinary(projectRoot, res, testId);
-    }
-    
-    // Check if any Go source files are newer than the binary
-    const binaryModTime = binaryStats.mtime;
-    let sourceModified = false;
-    
-    try {
-      await checkSourceFiles(projectRoot, binaryModTime, (newer) => {
-        sourceModified = newer;
+      dockerProcess.stdout.on('data', (data) => {
+        output += data.toString();
       });
       
-      if (sourceModified) {
-        console.log(`[BATCH API] Source changes detected, rebuilding binary...`);
-        res.write(`data: ${JSON.stringify({
-          type: 'build_start',
-          message: '🔨 Source changes detected, rebuilding binary...',
-          testId: testId
-        })}\n\n`);
-        
-        return await buildBinary(projectRoot, res, testId);
-      }
-    } catch (error) {
-      console.log(`[BATCH API] Warning: Could not check source file timestamps: ${error.message}`);
-      res.write(`data: ${JSON.stringify({
-        type: 'build_start',
-        message: '🔨 Rebuilding binary to be safe...',
-        testId: testId
-      })}\n\n`);
+      dockerProcess.stderr.on('data', (data) => {
+        error += data.toString();
+      });
       
-      return await buildBinary(projectRoot, res, testId);
-    }
-    
-    // Binary is up to date
-    console.log(`[BATCH API] Binary is up to date`);
-    return { success: true, binaryPath };
-    
-  } catch (error) {
-    console.error(`[BATCH API] Error checking binary status:`, error);
-    return { success: false, error: `Failed to check binary status: ${error.message}` };
-  }
-}
-
-// Check if any Go source files are newer than binary
-async function checkSourceFiles(dir, binaryModTime, callback) {
-  const items = await fs.promises.readdir(dir);
-  
-  for (const item of items) {
-    const fullPath = path.join(dir, item);
-    const stats = await fs.promises.stat(fullPath);
-    
-    if (stats.isDirectory()) {
-      // Skip certain directories
-      if (item === 'node_modules' || item === '.git' || item === 'web' || item === 'build' || item === 'test_results') {
-        continue;
-      }
+      dockerProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log(`[BATCH API] Docker Compose is available`);
+          res.write(`data: ${JSON.stringify({
+            type: 'build_complete',
+            message: '✅ Docker containers ready, starting tests...',
+            testId: testId
+          })}\n\n`);
+          resolve({ success: true });
+        } else {
+          console.error(`[BATCH API] Docker Compose not available:`, error);
+          resolve({ 
+            success: false, 
+            error: `Docker Compose not available: ${error}` 
+          });
+        }
+      });
       
-      // Recursively check subdirectories
-      await checkSourceFiles(fullPath, binaryModTime, callback);
-    } else if (path.extname(item) === '.go') {
-      if (stats.mtime > binaryModTime) {
-        callback(true);
-        return;
-      }
-    }
-  }
-}
-
-// Build the binary - similar to CLI buildBinary()
-function buildBinary(projectRoot, res, testId) {
-  return new Promise((resolve) => {
-    console.log(`[BATCH API] Starting Go build process...`);
-    
-    const buildProcess = spawn('go', ['build', '-o', 'k8s_diagnostic', '.'], {
-      cwd: projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env }
-    });
-    
-    let buildOutput = '';
-    let buildErrors = '';
-    
-    buildProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-      buildOutput += output;
-      console.log(`[BATCH API] Build stdout:`, output);
-      
-      res.write(`data: ${JSON.stringify({
-        type: 'build_output',
-        output: output,
-        testId: testId
-      })}\n\n`);
-      res.flush();
-    });
-    
-    buildProcess.stderr.on('data', (data) => {
-      const output = data.toString();
-      buildErrors += output;
-      console.error(`[BATCH API] Build stderr:`, output);
-      
-      res.write(`data: ${JSON.stringify({
-        type: 'build_output',
-        output: output,
-        testId: testId
-      })}\n\n`);
-    });
-    
-    buildProcess.on('close', (code) => {
-      if (code === 0) {
-        console.log(`[BATCH API] Build completed successfully`);
-        res.write(`data: ${JSON.stringify({
-          type: 'build_complete',
-          message: '✅ Binary built successfully, starting tests...',
-          testId: testId
-        })}\n\n`);
-        
-        resolve({ 
-          success: true, 
-          binaryPath: path.join(projectRoot, 'k8s_diagnostic')
-        });
-      } else {
-        console.error(`[BATCH API] Build failed with code ${code}`);
-        const errorMessage = buildErrors || buildOutput || `Build process exited with code ${code}`;
-        
+      dockerProcess.on('error', (err) => {
+        console.error(`[BATCH API] Docker check error:`, err);
         resolve({ 
           success: false, 
-          error: `Build failed: ${errorMessage}` 
+          error: `Docker check failed: ${err.message}` 
         });
-      }
-    });
-    
-    buildProcess.on('error', (error) => {
-      console.error(`[BATCH API] Build process error:`, error);
-      resolve({ 
-        success: false, 
-        error: `Build process failed: ${error.message}` 
       });
     });
-  });
+    
+  } catch (error) {
+    console.error(`[BATCH API] Error checking Docker:`, error);
+    return { success: false, error: `Failed to check Docker: ${error.message}` };
+  }
 }
+
 
 // Process fallback messages when found under individual test names
 function processFallbackMessages(fallbackData, testList, foundTestName) {
@@ -753,13 +657,13 @@ export default async function handler(req, res) {
   console.log(`[BATCH API] Project root: ${projectRoot}`);
   console.log(`[BATCH API] Current working directory: ${process.cwd()}`);
   
-  // Ensure binary is up to date (auto-build if needed)
-  const buildResult = await ensureBinaryIsUpToDate(projectRoot, res, testId);
-  if (!buildResult.success) {
-    console.error(`[BATCH API] ERROR: Binary build failed:`, buildResult.error);
+  // Ensure Docker Compose is available
+  const dockerResult = await ensureDockerIsAvailable(projectRoot, res, testId);
+  if (!dockerResult.success) {
+    console.error(`[BATCH API] ERROR: Docker check failed:`, dockerResult.error);
     res.write(`data: ${JSON.stringify({
       type: 'batch_error',
-      error: `❌ Build failed: ${buildResult.error}`,
+      error: `❌ Docker check failed: ${dockerResult.error}`,
       timestamp: new Date().toISOString()
     })}\n\n`);
     runningTests.delete(testId);
@@ -767,14 +671,17 @@ export default async function handler(req, res) {
     return;
   }
   
-  const binaryPath = buildResult.binaryPath;
-  console.log(`[BATCH API] Using binary at: ${binaryPath}`);
+  console.log(`[BATCH API] Using Docker Compose to spawn CLI container`);
   
-  // Spawn the CLI process
-  const args = ['test', 'list:', testListString, '--verbose'];
-  console.log(`[BATCH API] Spawning process with args:`, args);
+  // Spawn the CLI process using Docker Compose
+  const dockerArgs = [
+    'compose', 'run', '--rm', 
+    'k8s-diagnostic-cli-standalone',  // Use standalone service with host networking
+    'test', 'list:', testListString, '--verbose'
+  ];
+  console.log(`[BATCH API] Spawning Docker process with args:`, dockerArgs);
   
-  const childProcess = spawn(binaryPath, args, {
+  const childProcess = spawn('docker', dockerArgs, {
     cwd: projectRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,  // 🛡️ CRITICAL: Create new process group to manage child processes

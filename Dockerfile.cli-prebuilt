@@ -1,0 +1,12 @@
+FROM alpine:latest
+# Install kubectl and basic utilities
+RUN apk --no-cache add curl ca-certificates
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+WORKDIR /app
+# Copy the pre-built Linux binary
+COPY k8s-diagnostic-linux ./k8s-diagnostic
+RUN chmod +x ./k8s-diagnostic
+
+ENTRYPOINT ["./k8s-diagnostic"]

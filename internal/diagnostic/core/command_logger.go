@@ -23,26 +23,37 @@ var commandLoggerMu sync.Mutex
 // InitializeCommandLogger initializes the single command-level logger
 // This should be called once at the very start of each command execution
 func InitializeCommandLogger(namespace string, verbose bool) error {
+	fmt.Printf("DEBUG: InitializeCommandLogger starting (namespace=%s, verbose=%t)\n", namespace, verbose)
+
 	commandLoggerMu.Lock()
 	defer commandLoggerMu.Unlock()
 
+	fmt.Printf("DEBUG: Command logger mutex acquired\n")
+
 	// Close existing logger if it exists
 	if commandLoggerInstance != nil {
+		fmt.Printf("DEBUG: Closing existing command logger\n")
 		if err := commandLoggerInstance.close(); err != nil {
 			fmt.Printf("Warning: Error closing existing command logger: %v\n", err)
 		}
 	}
 
 	// Create shared timestamp for consistent file naming
+	fmt.Printf("DEBUG: Creating shared timestamp\n")
 	sharedTime := NewSharedTimestamp()
+	fmt.Printf("DEBUG: Shared timestamp created\n")
 
 	// Create multi-channel logger
+	fmt.Printf("DEBUG: About to call NewMultiChannelLogger\n")
 	multiChannelLogger, err := NewMultiChannelLogger(namespace, verbose)
 	if err != nil {
+		fmt.Printf("DEBUG: NewMultiChannelLogger failed: %v\n", err)
 		return fmt.Errorf("failed to create multi-channel logger: %v", err)
 	}
+	fmt.Printf("DEBUG: NewMultiChannelLogger succeeded\n")
 
 	// Create command logger instance
+	fmt.Printf("DEBUG: Creating command logger instance\n")
 	commandLoggerInstance = &CommandLogger{
 		multiChannelLogger: multiChannelLogger,
 		sharedTime:         sharedTime,
@@ -51,6 +62,7 @@ func InitializeCommandLogger(namespace string, verbose bool) error {
 		verbose:            verbose,
 	}
 
+	fmt.Printf("DEBUG: InitializeCommandLogger completed successfully\n")
 	return nil
 }
 
