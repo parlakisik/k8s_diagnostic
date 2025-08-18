@@ -5,33 +5,64 @@ import "context"
 // FeatureCheck defines a function that validates prerequisites for a feature.
 type FeatureCheck func(ctx context.Context) error
 
-// featureChecks holds known Cilium features mapped to their validators.
-var featureChecks = map[string]FeatureCheck{
-	"gateway-api":                   IsValidGatewayAPI,
-	"dns-policies":                  IsValidDNSPolicies,
-	"host-firewall":                 IsValidHostFirewall,
-	"egress-gateway":                IsValidEgressGateway,
-	"bgp-control-plane":             IsValidBGPControlPlane,
-	"wireguard":                     IsValidWireGuard,
-	"ipsec":                         IsValidIPsec,
-	"nodeport":                      IsValidNodePort,
-	"kube-proxy-replacement-strict": IsValidKubeProxyReplacementStrict,
-	"l2-announcements":              IsValidL2Announcements,
-}
-
-// ValidateFeatureByName runs the validator for a named feature, if known.
+// ValidateFeatureByName runs the validator for a named feature using the JSON-based configuration.
+// This now uses the shared JSON config instead of hardcoded mappings.
 func ValidateFeatureByName(ctx context.Context, feature string) error {
-	if fn, ok := featureChecks[feature]; ok {
-		return fn(ctx)
+	// Get config data from cilium-config ConfigMap
+	configData, err := getCiliumConfigData()
+	if err != nil {
+		return err
 	}
-	return nil
+
+	// Use the new JSON-based validation
+	return ValidateFeatureFromConfig(feature, configData)
 }
 
 // ListKnownFeatures returns feature keys known to this validator registry.
+// Now dynamically loaded from the JSON configuration.
 func ListKnownFeatures() []string {
-	keys := make([]string, 0, len(featureChecks))
-	for k := range featureChecks {
-		keys = append(keys, k)
-	}
-	return keys
+	return ListAllFeatures()
+}
+
+// Legacy functions maintained for backward compatibility
+// These now delegate to the JSON-based validation system
+
+func IsValidGatewayAPI(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "gateway-api")
+}
+
+func IsValidDNSPolicies(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "dns-policies")
+}
+
+func IsValidHostFirewall(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "host-firewall")
+}
+
+func IsValidEgressGateway(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "egress-gateway")
+}
+
+func IsValidBGPControlPlane(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "bgp-control-plane")
+}
+
+func IsValidWireGuard(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "wireguard")
+}
+
+func IsValidIPsec(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "ipsec")
+}
+
+func IsValidNodePort(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "nodeport")
+}
+
+func IsValidKubeProxyReplacementStrict(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "kube-proxy-replacement-strict")
+}
+
+func IsValidL2Announcements(ctx context.Context) error {
+	return ValidateFeatureByName(ctx, "l2-announcements")
 }

@@ -1,0 +1,431 @@
+{
+  "features": {
+    "l7-proxy": {
+      "configKeys": ["enable-l7-proxy", "l7Proxy"],
+      "displayName": "L7 Proxy",
+      "category": "security",
+      "priority": "recommended",
+      "description": "HTTP/gRPC policy enforcement at Layer 7",
+      "useCase": "Enable for application-layer security and HTTP method filtering",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "basic-http-get",
+          "description": "Validates HTTP GET request policies",
+          "rationale": "L7 proxy enables HTTP method filtering and request inspection"
+        },
+        {
+          "name": "http-with-headers", 
+          "description": "Tests HTTP policies with custom headers",
+          "rationale": "L7 proxy allows header-based policy enforcement"
+        },
+        {
+          "name": "path-method",
+          "description": "Validates HTTP path and method filtering",
+          "rationale": "L7 proxy provides fine-grained HTTP path control"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/policy/l7/"
+    },
+    "hubble": {
+      "configKeys": ["enable-hubble", "hubble.enabled"],
+      "displayName": "Hubble Observability",
+      "category": "observability",
+      "priority": "recommended",
+      "description": "Network observability and monitoring platform",
+      "useCase": "Enable for comprehensive network visibility and troubleshooting",
+      "complexity": "low",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "pod-to-pod-cross-node",
+          "description": "Tests cross-node pod communication with observability",
+          "rationale": "Hubble provides detailed flow visibility for cross-node traffic"
+        },
+        {
+          "name": "service-clusterip",
+          "description": "Validates ClusterIP service functionality with monitoring",
+          "rationale": "Hubble tracks service-level network flows and metrics"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/observability/hubble/"
+    },
+    "k8s-networkpolicy": {
+      "configKeys": ["enable-k8s-networkpolicy", "k8sNetworkPolicy.enabled"],
+      "displayName": "Kubernetes Network Policies",
+      "category": "security",
+      "priority": "recommended",
+      "description": "Kubernetes NetworkPolicy enforcement",
+      "useCase": "Enable for standard Kubernetes network policy support",
+      "complexity": "low",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "cidr-ingress",
+          "description": "Validates CIDR-based ingress filtering",
+          "rationale": "NetworkPolicy enforcement enables IP-based traffic control"
+        },
+        {
+          "name": "cidr-egress",
+          "description": "Tests CIDR-based egress filtering",
+          "rationale": "NetworkPolicy enforcement controls outbound traffic by IP ranges"
+        },
+        {
+          "name": "allow-all",
+          "description": "Tests allow-all network policy behavior",
+          "rationale": "Validates that NetworkPolicy can permit all traffic when configured"
+        },
+        {
+          "name": "deny-all",
+          "description": "Validates deny-all network policy enforcement",
+          "rationale": "Tests that NetworkPolicy can block all traffic by default"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/policy/k8s/"
+    },
+    "dns-proxy": {
+      "configKeys": ["enable-dnsproxy", "dnsProxy.enabled"],
+      "displayName": "DNS Proxy",
+      "category": "security",
+      "priority": "recommended",
+      "description": "DNS-aware network policies and FQDN filtering",
+      "useCase": "Enable for DNS-based policy enforcement and FQDN filtering",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "dns-based",
+          "description": "Tests DNS-based network policies",
+          "rationale": "DNS proxy enables FQDN-based traffic filtering"
+        },
+        {
+          "name": "dns-matchname",
+          "description": "Validates DNS name matching policies",
+          "rationale": "DNS proxy supports exact FQDN matching for policies"
+        },
+        {
+          "name": "dns-matchpattern",
+          "description": "Tests DNS pattern matching policies",
+          "rationale": "DNS proxy allows wildcard and pattern-based FQDN matching"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/policy/l7/dns/"
+    },
+    "host-firewall": {
+      "configKeys": ["enable-host-firewall", "hostFirewall.enabled"],
+      "displayName": "Host Firewall",
+      "category": "security",
+      "priority": "security",
+      "description": "Host-level network security and firewall rules",
+      "useCase": "Enable for node-level security hardening and host protection",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "node-selector",
+          "description": "Validates node selector policies",
+          "rationale": "Host firewall enables node-level policy enforcement"
+        },
+        {
+          "name": "node-based",
+          "description": "Tests node-based network policies",
+          "rationale": "Host firewall provides node-to-node traffic control"
+        },
+        {
+          "name": "node-cidr",
+          "description": "Validates node CIDR filtering",
+          "rationale": "Host firewall can filter traffic based on node IP ranges"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/host-firewall/"
+    },
+    "wireguard": {
+      "configKeys": ["enable-wireguard", "encryption", "encryption-type"],
+      "displayName": "WireGuard Encryption",
+      "category": "security",
+      "priority": "security",
+      "description": "WireGuard-based transparent network encryption",
+      "useCase": "Enable for high-performance encrypted pod-to-pod communication",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "pod-to-pod-cross-node",
+          "description": "Tests encrypted cross-node pod communication",
+          "rationale": "WireGuard provides transparent encryption for inter-node traffic"
+        },
+        {
+          "name": "service-cross-node",
+          "description": "Validates encrypted cross-node service communication",
+          "rationale": "WireGuard encrypts service traffic between nodes"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/transparent-encryption/"
+    },
+    "ipsec": {
+      "configKeys": ["enable-ipsec", "encryption", "encryption-type"],
+      "displayName": "IPsec Encryption",
+      "category": "security", 
+      "priority": "security",
+      "description": "IPsec-based transparent network encryption",
+      "useCase": "Enable for encrypted pod-to-pod communication (alternative to WireGuard)",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "pod-to-pod-cross-node",
+          "description": "Tests encrypted cross-node pod communication",
+          "rationale": "IPsec provides transparent encryption for inter-node traffic"
+        },
+        {
+          "name": "service-cross-node",
+          "description": "Validates encrypted cross-node service communication",
+          "rationale": "IPsec encrypts service traffic between nodes"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/transparent-encryption/"
+    },
+    "bgp-control-plane": {
+      "configKeys": ["enable-bgp-control-plane", "bgpControlPlane.enabled"],
+      "displayName": "BGP Control Plane",
+      "category": "networking",
+      "priority": "enterprise",
+      "description": "Advanced BGP routing for load balancer IP management",
+      "useCase": "Enable for advanced load balancer IP advertisement in enterprise environments",
+      "complexity": "high",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "service-loadbalancer",
+          "description": "Tests LoadBalancer service with BGP announcement",
+          "rationale": "BGP control plane manages LoadBalancer IP advertisement"
+        },
+        {
+          "name": "service-nodeport",
+          "description": "Validates NodePort service with BGP integration",
+          "rationale": "BGP control plane can advertise NodePort service IPs"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/network/bgp/"
+    },
+    "egress-gateway": {
+      "configKeys": ["enable-egress-gateway", "egressGateway.enabled"],
+      "displayName": "Egress Gateway",
+      "category": "networking",
+      "priority": "enterprise",
+      "description": "Centralized egress gateway for controlling outbound traffic",
+      "useCase": "Enable for centralized egress control in enterprise environments",
+      "complexity": "high", 
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "cidr-egress",
+          "description": "Tests CIDR-based egress filtering through gateway",
+          "rationale": "Egress gateway provides centralized outbound traffic control"
+        },
+        {
+          "name": "tcp-port-egress",
+          "description": "Validates TCP port-based egress filtering",
+          "rationale": "Egress gateway enables port-specific egress policies"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/network/egress-gateway/"
+    },
+    "l2-announcements": {
+      "configKeys": ["enable-l2-announcements", "l2announcements.enabled"],
+      "displayName": "L2 Load Balancer Announcements",
+      "category": "networking",
+      "priority": "specialized",
+      "description": "Layer 2 network announcements for load balancer IPs",
+      "useCase": "Enable for on-premises load balancer IP advertisement",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "service-loadbalancer",
+          "description": "Tests LoadBalancer service with L2 announcements",
+          "rationale": "L2 announcements advertise LoadBalancer IPs at Layer 2"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/network/l2-announcements/"
+    },
+    "nodeport": {
+      "configKeys": ["enable-node-port", "nodePort.enabled"],
+      "displayName": "NodePort Services",
+      "category": "networking",
+      "priority": "common",
+      "description": "Direct node port access for services",
+      "useCase": "Enable for services requiring direct node access",
+      "complexity": "low",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "service-nodeport",
+          "description": "Validates NodePort service functionality",
+          "rationale": "NodePort feature enables direct service access via node IPs"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/network/services/"
+    },
+    "kube-proxy-replacement": {
+      "configKeys": ["kube-proxy-replacement", "kubeProxyReplacement"],
+      "displayName": "Kube-proxy Replacement",
+      "category": "performance",
+      "priority": "recommended",
+      "description": "Replace kube-proxy for enhanced performance",
+      "useCase": "Enable for improved service mesh performance and functionality",
+      "complexity": "medium",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "service-clusterip",
+          "description": "Tests ClusterIP service without kube-proxy",
+          "rationale": "Kube-proxy replacement handles ClusterIP service routing"
+        },
+        {
+          "name": "service-nodeport",
+          "description": "Validates NodePort service without kube-proxy", 
+          "rationale": "Kube-proxy replacement manages NodePort service access"
+        },
+        {
+          "name": "service-loadbalancer",
+          "description": "Tests LoadBalancer service without kube-proxy",
+          "rationale": "Kube-proxy replacement handles LoadBalancer service routing"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/"
+    },
+    "policy-enforcement": {
+      "configKeys": ["enable-policy"],
+      "displayName": "Policy Enforcement",
+      "category": "security",
+      "priority": "recommended",
+      "description": "Network policy enforcement mode",
+      "useCase": "Enable for network traffic filtering and security policies",
+      "complexity": "low",
+      "dependencies": [],
+      "tests": [
+        {
+          "name": "allow-all",
+          "description": "Tests allow-all policy behavior",
+          "rationale": "Policy enforcement validates permissive policy rules"
+        },
+        {
+          "name": "deny-all", 
+          "description": "Validates deny-all policy enforcement",
+          "rationale": "Policy enforcement blocks traffic based on restrictive policies"
+        },
+        {
+          "name": "cidr-ingress",
+          "description": "Tests CIDR-based ingress policy enforcement",
+          "rationale": "Policy enforcement enables IP-based traffic filtering"
+        }
+      ],
+      "documentation": "https://docs.cilium.io/en/stable/security/policy/"
+    }
+  },
+  "validationFeatures": {
+    "gateway-api": {
+      "displayName": "Gateway API Support",
+      "category": "networking",
+      "priority": "recommended",
+      "description": "Kubernetes Gateway API support for advanced ingress and traffic management",
+      "useCase": "Enable for modern ingress controllers and advanced traffic routing",
+      "complexity": "medium"
+    },
+    "dns-policies": {
+      "displayName": "DNS-based Policies",
+      "category": "security",
+      "priority": "recommended",
+      "description": "DNS-aware network policies for FQDN-based traffic filtering",
+      "useCase": "Enable for enhanced security with DNS-based filtering",
+      "complexity": "low"
+    },
+    "host-firewall": {
+      "displayName": "Host Firewall",
+      "category": "security",
+      "priority": "security",
+      "description": "Host-level network security and firewall rules",
+      "useCase": "Enable for node-level security hardening",
+      "complexity": "medium"
+    },
+    "egress-gateway": {
+      "displayName": "Egress Gateway",
+      "category": "networking",
+      "priority": "enterprise",
+      "description": "Centralized egress gateway for controlling outbound traffic",
+      "useCase": "Enable for centralized egress control in enterprise environments",
+      "complexity": "high"
+    },
+    "bgp-control-plane": {
+      "displayName": "BGP Control Plane",
+      "category": "networking",
+      "priority": "enterprise",
+      "description": "Advanced BGP routing for load balancer IP management",
+      "useCase": "Enable for advanced load balancer IP advertisement",
+      "complexity": "high"
+    },
+    "wireguard": {
+      "displayName": "WireGuard Encryption",
+      "category": "security",
+      "priority": "security",
+      "description": "WireGuard-based transparent network encryption",
+      "useCase": "Enable for high-performance encrypted pod-to-pod communication",
+      "complexity": "medium"
+    },
+    "ipsec": {
+      "displayName": "IPsec Encryption",
+      "category": "security",
+      "priority": "security",
+      "description": "IPsec-based transparent network encryption",
+      "useCase": "Enable for encrypted pod-to-pod communication (alternative to WireGuard)",
+      "complexity": "medium"
+    },
+    "nodeport": {
+      "displayName": "NodePort Services",
+      "category": "networking",
+      "priority": "common",
+      "description": "Direct node port access for services",
+      "useCase": "Enable for services requiring direct node access",
+      "complexity": "low"
+    },
+    "kube-proxy-replacement-strict": {
+      "displayName": "Kube-proxy Replacement (Strict)",
+      "category": "performance",
+      "priority": "advanced",
+      "description": "Complete replacement of kube-proxy for enhanced performance",
+      "useCase": "Enable for maximum performance in kube-proxy-less environments",
+      "complexity": "high"
+    },
+    "l2-announcements": {
+      "displayName": "L2 Load Balancer Announcements",
+      "category": "networking",
+      "priority": "specialized",
+      "description": "Layer 2 network announcements for load balancer IPs",
+      "useCase": "Enable for on-premises load balancer IP advertisement",
+      "complexity": "medium"
+    }
+  },
+  "testDescriptions": {
+    "basic-http-get": "Validates HTTP GET request policies",
+    "http-with-headers": "Tests HTTP policies with custom headers", 
+    "path-method": "Validates HTTP path and method filtering",
+    "pod-to-pod-cross-node": "Tests cross-node pod communication",
+    "service-clusterip": "Validates ClusterIP service functionality",
+    "service-cross-node": "Tests cross-node service communication",
+    "cidr-ingress": "Validates CIDR-based ingress filtering",
+    "cidr-egress": "Tests CIDR-based egress filtering",
+    "allow-all": "Tests allow-all network policy",
+    "deny-all": "Validates deny-all network policy",
+    "dns-based": "Tests DNS-based network policies",
+    "dns-matchname": "Validates DNS name matching policies",
+    "dns-matchpattern": "Tests DNS pattern matching policies",
+    "node-selector": "Validates node selector policies",
+    "node-based": "Tests node-based network policies", 
+    "node-cidr": "Validates node CIDR filtering",
+    "service-loadbalancer": "Tests LoadBalancer service functionality",
+    "service-nodeport": "Validates NodePort service access",
+    "tcp-port-egress": "Tests TCP port-based egress filtering"
+  }
+}

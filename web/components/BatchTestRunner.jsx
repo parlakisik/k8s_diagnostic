@@ -24,46 +24,54 @@ const bounceStyles = `
 `;
 
 const getTestColorClass = (testName) => {
+  // Defensive type checking - handle both strings and objects
+  const name = typeof testName === 'string' ? testName : 
+               (testName?.name || testName?.testName || String(testName || ''));
+  
+  if (!name || typeof name !== 'string') {
+    return 'test-card-infrastructure'; // fallback color
+  }
+  
   // Map test names to color categories with improved logic
   
   // Security/Policy Tests (Red - Results color for security focus)
-  if (testName.includes('deny-all') || testName.includes('reject') || testName.includes('security') || testName.includes('allow-all')) {
+  if (name.includes('deny-all') || name.includes('reject') || name.includes('security') || name.includes('allow-all')) {
     return 'test-card-results';
   }
   
   // Networking Tests (Pink)
-  else if (testName.includes('pod-to-pod') || testName.includes('service-clusterip') || 
-           testName.includes('service-nodeport') || testName.includes('service-loadbalancer') || 
-           testName.includes('service-') || testName === 'dns-resolution') {
+  else if (name.includes('pod-to-pod') || name.includes('service-clusterip') || 
+           name.includes('service-nodeport') || name.includes('service-loadbalancer') || 
+           name.includes('service-') || name === 'dns-resolution') {
     return 'test-card-networking';
   }
   
   // L3 Policy Tests (Orange)
-  else if (testName.includes('cidr') || testName.includes('endpoints') || testName.includes('entities') || 
-           testName.includes('dns-based') || testName.includes('node-') || 
-           testName.includes('kubernetes-service') || testName.includes('namespace') || 
-           testName.includes('label-based') || testName.includes('same-namespace') || 
-           testName.includes('deny-namespace') || testName.includes('same-label') || 
-           testName.includes('deny-label')) {
+  else if (name.includes('cidr') || name.includes('endpoints') || name.includes('entities') || 
+           name.includes('dns-based') || name.includes('node-') || 
+           name.includes('kubernetes-service') || name.includes('namespace') || 
+           name.includes('label-based') || name.includes('same-namespace') || 
+           name.includes('deny-namespace') || name.includes('same-label') || 
+           name.includes('deny-label')) {
     return 'test-card-l3';
   }
   
   // L4 Policy Tests (Purple/Blue)
-  else if (testName.includes('tcp-port') || testName.includes('port-') || testName.includes('icmp') || 
-           testName.includes('sni') || testName.includes('tls') || testName.includes('udp') ||
-           testName.includes('multiple-port') || testName.includes('port-range')) {
+  else if (name.includes('tcp-port') || name.includes('port-') || name.includes('icmp') || 
+           name.includes('sni') || name.includes('tls') || name.includes('udp') ||
+           name.includes('multiple-port') || name.includes('port-range')) {
     return 'test-card-l4';
   }
   
   // L7 Policy Tests (Yellow)
-  else if (testName.includes('http') || testName.includes('dns-match') || testName.includes('grpc') ||
-           testName.includes('kafka') || testName.includes('path-') || testName.includes('method-') ||
-           testName.includes('header')) {
+  else if (name.includes('http') || name.includes('dns-match') || name.includes('grpc') ||
+           name.includes('kafka') || name.includes('path-') || name.includes('method-') ||
+           name.includes('header')) {
     return 'test-card-l7';
   }
   
   // DNS Service Tests (Purple - specific DNS color)
-  else if (testName.includes('dns') && !testName.includes('dns-resolution')) {
+  else if (name.includes('dns') && !name.includes('dns-resolution')) {
     return 'test-card-dns';
   }
   
@@ -74,62 +82,78 @@ const getTestColorClass = (testName) => {
 };
 
 const getTestIcon = (testName) => {
-  if (testName.includes('pod-to-pod')) return '🔗';
-  if (testName.includes('service-')) return '🌐';
-  if (testName.includes('dns')) return '🔍';
-  if (testName.includes('cidr')) return '🛡️';
-  if (testName.includes('endpoints') || testName.includes('entities')) return '🏷️';
-  if (testName.includes('node-')) return '📡';
-  if (testName.includes('tcp') || testName.includes('port')) return '🔌';
-  if (testName.includes('icmp')) return '📡';
-  if (testName.includes('sni')) return '🔒';
-  if (testName.includes('http')) return '🌍';
-  if (testName.includes('allow-all')) return '🔓';
-  if (testName.includes('deny-all')) return '🔒';
+  // Defensive type checking - handle both strings and objects
+  const name = typeof testName === 'string' ? testName : 
+               (testName?.name || testName?.testName || String(testName || ''));
+  
+  if (!name || typeof name !== 'string') {
+    return '⚙️'; // fallback icon
+  }
+  
+  if (name.includes('pod-to-pod')) return '🔗';
+  if (name.includes('service-')) return '🌐';
+  if (name.includes('dns')) return '🔍';
+  if (name.includes('cidr')) return '🛡️';
+  if (name.includes('endpoints') || name.includes('entities')) return '🏷️';
+  if (name.includes('node-')) return '📡';
+  if (name.includes('tcp') || name.includes('port')) return '🔌';
+  if (name.includes('icmp')) return '📡';
+  if (name.includes('sni')) return '🔒';
+  if (name.includes('http')) return '🌍';
+  if (name.includes('allow-all')) return '🔓';
+  if (name.includes('deny-all')) return '🔒';
   return '⚙️';
 };
 
 const getSkeletonColor = (testName) => {
+  // Defensive type checking - handle both strings and objects
+  const name = typeof testName === 'string' ? testName : 
+               (testName?.name || testName?.testName || String(testName || ''));
+  
+  if (!name || typeof name !== 'string') {
+    return 'bg-teal-400'; // fallback color
+  }
+  
   // Return category-specific colors for skeleton bars - matches getTestColorClass logic
   
   // Security/Policy Tests (Red)
-  if (testName.includes('deny-all') || testName.includes('reject') || testName.includes('security') || testName.includes('allow-all')) {
+  if (name.includes('deny-all') || name.includes('reject') || name.includes('security') || name.includes('allow-all')) {
     return 'bg-red-400';
   }
   
   // Networking Tests (Pink)
-  else if (testName.includes('pod-to-pod') || testName.includes('service-clusterip') || 
-           testName.includes('service-nodeport') || testName.includes('service-loadbalancer') || 
-           testName.includes('service-') || testName === 'dns-resolution') {
+  else if (name.includes('pod-to-pod') || name.includes('service-clusterip') || 
+           name.includes('service-nodeport') || name.includes('service-loadbalancer') || 
+           name.includes('service-') || name === 'dns-resolution') {
     return 'bg-pink-400';
   }
   
   // L3 Policy Tests (Orange)
-  else if (testName.includes('cidr') || testName.includes('endpoints') || testName.includes('entities') || 
-           testName.includes('dns-based') || testName.includes('node-') || 
-           testName.includes('kubernetes-service') || testName.includes('namespace') || 
-           testName.includes('label-based') || testName.includes('same-namespace') || 
-           testName.includes('deny-namespace') || testName.includes('same-label') || 
-           testName.includes('deny-label')) {
+  else if (name.includes('cidr') || name.includes('endpoints') || name.includes('entities') || 
+           name.includes('dns-based') || name.includes('node-') || 
+           name.includes('kubernetes-service') || name.includes('namespace') || 
+           name.includes('label-based') || name.includes('same-namespace') || 
+           name.includes('deny-namespace') || name.includes('same-label') || 
+           name.includes('deny-label')) {
     return 'bg-orange-400';
   }
   
   // L4 Policy Tests (Purple/Blue)
-  else if (testName.includes('tcp-port') || testName.includes('port-') || testName.includes('icmp') || 
-           testName.includes('sni') || testName.includes('tls') || testName.includes('udp') ||
-           testName.includes('multiple-port') || testName.includes('port-range')) {
+  else if (name.includes('tcp-port') || name.includes('port-') || name.includes('icmp') || 
+           name.includes('sni') || name.includes('tls') || name.includes('udp') ||
+           name.includes('multiple-port') || name.includes('port-range')) {
     return 'bg-indigo-400';
   }
   
   // L7 Policy Tests (Yellow)
-  else if (testName.includes('http') || testName.includes('dns-match') || testName.includes('grpc') ||
-           testName.includes('kafka') || testName.includes('path-') || testName.includes('method-') ||
-           testName.includes('header')) {
+  else if (name.includes('http') || name.includes('dns-match') || name.includes('grpc') ||
+           name.includes('kafka') || name.includes('path-') || name.includes('method-') ||
+           name.includes('header')) {
     return 'bg-yellow-400';
   }
   
   // DNS Service Tests (Purple)
-  else if (testName.includes('dns') && !testName.includes('dns-resolution')) {
+  else if (name.includes('dns') && !name.includes('dns-resolution')) {
     return 'bg-purple-400';
   }
   
@@ -140,38 +164,46 @@ const getSkeletonColor = (testName) => {
 };
 
 const getTestCategory = (testName) => {
+  // Defensive type checking - handle both strings and objects
+  const name = typeof testName === 'string' ? testName : 
+               (testName?.name || testName?.testName || String(testName || ''));
+  
+  if (!name || typeof name !== 'string') {
+    return 'Infrastructure Test'; // fallback category
+  }
+  
   // Map test names to their categories
-  if (testName.includes('pod-to-pod')) {
+  if (name.includes('pod-to-pod')) {
     return 'Cross-Node Connectivity';
-  } else if (testName.includes('service-clusterip')) {
+  } else if (name.includes('service-clusterip')) {
     return 'ClusterIP Service';
-  } else if (testName.includes('service-nodeport')) {
+  } else if (name.includes('service-nodeport')) {
     return 'NodePort Service';
-  } else if (testName.includes('service-loadbalancer')) {
+  } else if (name.includes('service-loadbalancer')) {
     return 'LoadBalancer Service';
-  } else if (testName.includes('service-')) {
+  } else if (name.includes('service-')) {
     return 'Service Connectivity';
-  } else if (testName === 'dns-resolution') {
+  } else if (name === 'dns-resolution') {
     return 'DNS Resolution';
-  } else if (testName.includes('cidr')) {
+  } else if (name.includes('cidr')) {
     return 'L3 CIDR Policies';
-  } else if (testName.includes('endpoints') || testName.includes('entities')) {
+  } else if (name.includes('endpoints') || name.includes('entities')) {
     return 'L3 Label Policies';
-  } else if (testName.includes('dns-based') || testName.includes('node-')) {
+  } else if (name.includes('dns-based') || name.includes('node-')) {
     return 'L3 DNS & Node Policies';
-  } else if (testName.includes('kubernetes-service')) {
+  } else if (name.includes('kubernetes-service')) {
     return 'L3 Service Policies';
-  } else if (testName.includes('tcp-port') || testName.includes('port-')) {
+  } else if (name.includes('tcp-port') || name.includes('port-')) {
     return 'L4 Port Policies';
-  } else if (testName.includes('icmp')) {
+  } else if (name.includes('icmp')) {
     return 'L4 ICMP Policies';
-  } else if (testName.includes('sni')) {
+  } else if (name.includes('sni')) {
     return 'L4 TLS/SNI Policies';
-  } else if (testName.includes('http')) {
+  } else if (name.includes('http')) {
     return 'L7 HTTP Policies';
-  } else if (testName.includes('dns-match')) {
+  } else if (name.includes('dns-match')) {
     return 'L7 DNS Policies';
-  } else if (testName.includes('deny-all') || testName.includes('allow-all')) {
+  } else if (name.includes('deny-all') || name.includes('allow-all')) {
     return 'Security Policies';
   } else {
     return 'Infrastructure Test';
@@ -192,7 +224,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const [currentPhase, setCurrentPhase] = useState('');
   const [liveOutput, setLiveOutput] = useState([]);
   const [filteredOutput, setFilteredOutput] = useState([]);
-  const [selectedTests, setSelectedTests] = useState(new Set(testQueue)); // Initialize with all tests selected
+  // Initialize with all tests selected, extracting string names from potential objects
+  const [selectedTests, setSelectedTests] = useState(new Set(
+    testQueue.map(testName => 
+      typeof testName === 'string' ? testName : 
+      (testName?.name || testName?.testName || String(testName || 'unknown-test'))
+    )
+  ));
   const [backendError, setBackendError] = useState(null); // Track backend process errors
   const [connectionLost, setConnectionLost] = useState(false); // Track SSE connection status
   const [showCliCommands, setShowCliCommands] = useState(false); // CLI commands visibility toggle
@@ -308,7 +346,16 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     
     if (trimmed.includes('universal_cleanup completed') || 
         trimmed.includes('Cleanup completed successfully')) {
-      const newMessage = '✅ Post Test Cleanup COMPLETED';
+      
+      // CRITICAL FIX: Context-aware cleanup completion mapping
+      // Determine if we're in pre-test or post-test cleanup based on actual test execution state
+      const hasTestsStarted = currentlyRunning.size > 0 || 
+                             Object.values(testResults).some(r => ['success', 'failed', 'running'].includes(r.status));
+      
+      const newMessage = hasTestsStarted ? 
+        '✅ Post Test Cleanup COMPLETED' :     // After tests have actually run
+        '✅ Pre-test cleanup completed';       // Before tests have started
+        
       if (lastPhaseMessageRef.current !== newMessage) {
         lastPhaseMessageRef.current = newMessage;
         return newMessage;
@@ -371,7 +418,15 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       return;
     }
 
-    const selectedTestsList = Array.from(selectedTests);
+    // CRITICAL FIX: Preserve original testQueue order for execution
+    // Filter testQueue to only include selected tests, maintaining original order
+    const selectedTestsList = testQueue
+      .map(testName => typeof testName === 'string' ? testName : 
+           (testName?.name || testName?.testName || String(testName || 'unknown-test')))
+      .filter(testName => selectedTests.has(testName));
+    
+    console.log('[BatchTestRunner] 🚀 Starting batch execution with test queue:', selectedTestsList);
+    console.log('[BatchTestRunner] 📋 Original testQueue order preserved - tests will run in selection order');
     const newTestId = Date.now().toString();
     setTestId(newTestId);
     setIsRunning(true);
@@ -408,7 +463,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         headers: { 'Content-Type': 'application/json' }
       });
     } catch (cleanupError) {
-      console.warn('[BatchTestRunner] ⚠️ Failed to clear server events (non-critical):', cleanupError);
+      // Silent cleanup error handling
     }
 
     // Initialize test states for selected tests only
@@ -435,7 +490,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        console.error('[BatchTestRunner] API error response:', errorData);
         throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || 'Unknown error'}`);
       }
 
@@ -465,14 +519,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               const eventData = JSON.parse(line.substring(6));
               handleTestEvent(eventData);
             } catch (parseError) {
-              console.error('[BatchTestRunner] Failed to parse SSE event:', parseError);
+              // Silent parse error handling
             }
           }
         }
       }
 
     } catch (err) {
-      console.error('[BatchTestRunner] Batch test execution error:', err);
       setError(`Failed to execute batch tests: ${err.message}`);
       setIsRunning(false);
       setIsLoading(false); // CRITICAL: Reset loading state on error
@@ -486,8 +539,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const stopAllTests = async () => {
-    console.log('[BatchTestRunner] STOP button clicked - terminating all tests');
-    
     // 🎯 IMMEDIATE: Hide modal instantly for immediate user feedback
     setIsRunning(false);
     setCurrentlyRunning(new Set());
@@ -505,8 +556,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       });
 
       if (response.ok) {
-        console.log('[BatchTestRunner] Stop signal sent successfully');
-        
         // 🛡️ FIXED: Use atomic state updates for termination
         setTestResults(prev => {
           const updated = { ...prev };
@@ -523,16 +572,12 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         
         setOverallProgress(100);
         stopStatusPolling();
-        
-        console.log('[BatchTestRunner] ✅ All tests terminated successfully');
       } else {
-        console.error('[BatchTestRunner] Failed to stop tests:', response.status);
         setError('Failed to stop tests - they may continue running');
         // 🛡️ FIXED: Ensure modal stays hidden even if API fails
         setIsRunning(false);
       }
     } catch (err) {
-      console.error('[BatchTestRunner] Error stopping tests:', err);
       setError(`Failed to stop tests: ${err.message}`);
       // 🛡️ FIXED: Ensure modal stays hidden even on exceptions
       setIsRunning(false);
@@ -551,7 +596,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const calculateProgress = (testResults, totalTests) => {
     // 🔒 MUTEX PROTECTION: Prevent concurrent progress calculations
     if (progressMutex.current) {
-      console.warn(`[BatchTestRunner] 🔒 Progress calculation blocked - mutex active`);
       return lastValidProgress.current;
     }
     
@@ -588,8 +632,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       
       // 🛡️ CRITICAL VALIDATION: Detect impossible state combinations
       if (totalCompleted > totalTests) {
-        console.error(`[BatchTestRunner] 🚨 CRITICAL STATE CORRUPTION: completed (${totalCompleted}) > total (${totalTests})`);
-        console.error(`[BatchTestRunner] 🔍 State breakdown:`, statusCounts);
         return lastValidProgress.current; // Return last known good progress
       }
       
@@ -620,18 +662,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       const isValidProgression = rounded >= currentProgress || isResetScenario;
       
       if (isBackwardMovement && !isResetScenario) {
-        console.warn(`[BatchTestRunner] 🛑 BLOCKED: Progress backward movement ${currentProgress}% → ${rounded}%`);
-        console.warn(`[BatchTestRunner] 🔍 Validation: completed=${totalCompleted}/${totalTests}, states=`, statusCounts);
         return currentProgress;
       }
       
       // 🛡️ CRITICAL: Update last valid progress atomically
       lastValidProgress.current = rounded;
       
-      // Log significant changes for monitoring
-      if (Math.abs(rounded - currentProgress) >= 10 || rounded === 100 || rounded === 0) {
-        console.log(`[BatchTestRunner] 📊 VALIDATED progress change: ${currentProgress}% → ${rounded}% (${totalCompleted}/${totalTests})`);
-      }
+      // Log significant changes for monitoring (removed)
       
       return rounded;
       
@@ -682,7 +719,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const testStateHistory = useRef(new Map()); // testName -> array of state transitions for debugging
   const eventTimestamps = useRef(new Map()); // testName -> last event timestamp to prevent out-of-order processing
 
-  // 🔒 ENHANCED: State transition validation with stricter rules
+  // 🔒 ENHANCED: State transition validation with stale result detection
   const isValidStateTransition = (testName, currentStatus, newStatus) => {
     // Define valid state transitions with stricter rules
     const validTransitions = {
@@ -692,12 +729,17 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       'running': ['success', 'failed', 'terminated'],
       'success': [], // Final state - no transitions allowed
       'failed': [], // Final state - no transitions allowed  
-      'terminated': [] // Final state - no transitions allowed
+      'terminated': [] // Final state - no transitions allowed to prevent stale results
     };
 
-    // Special case: prevent overwriting completed states
-    if (['success', 'failed', 'terminated'].includes(currentStatus)) {
-      console.warn(`[BatchTestRunner] 🛑 BLOCKED: Attempt to overwrite final state ${currentStatus} → ${newStatus} for ${testName}`);
+    // CRITICAL FIX: Block ALL backend results after user termination (tests are sequential - later tests never ran)
+    if (currentStatus === 'terminated' && ['success', 'failed'].includes(newStatus)) {
+      console.log(`[BatchTestRunner] 🛑 STALE RESULT BLOCKED: Ignoring backend ${newStatus} for ${testName} - tests are sequential, this test never ran after user termination`);
+      return false;
+    }
+
+    // Special case: prevent overwriting completed states (except termination override above)
+    if (['success', 'failed'].includes(currentStatus)) {
       return false;
     }
 
@@ -705,9 +747,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     const isValid = allowed.includes(newStatus);
     
     if (!isValid) {
-      console.warn(`[BatchTestRunner] 🛑 INVALID STATE TRANSITION blocked: ${testName} ${currentStatus} → ${newStatus}`);
-      
-      // Record invalid transition attempt for debugging
+      // Record invalid transition attempt for debugging (no console spam)
       const history = testStateHistory.current.get(testName) || [];
       history.push({
         timestamp: Date.now(),
@@ -840,7 +880,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         });
         testStateHistory.current.set(testName, history.slice(-20)); // Keep more history
         
-        console.log(`[BatchTestRunner] ✅ ATOMIC STATE UPDATE: ${testName} ${currentStatus} → ${newStatus} [${id}]`);
         success = true;
         
         const newState = {
@@ -861,7 +900,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     });
     
     if (transitionBlocked) {
-      console.warn(`[BatchTestRunner] 🛑 BLOCKED TRANSITION: ${id} - Invalid state transition blocked`);
       return false;
     }
     
@@ -869,7 +907,10 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const handleTestEvent = async (eventData) => {
-    const testName = eventData.testName || eventData.data?.testName;
+    // CRITICAL FIX: Ensure testName is always converted to string early to prevent object propagation
+    const rawTestName = eventData.testName || eventData.data?.testName;
+    const testName = typeof rawTestName === 'string' ? rawTestName : 
+                     (rawTestName?.name || rawTestName?.testName || String(rawTestName || 'unknown-test'));
     const eventTimestamp = eventData.timestamp || Date.now();
     
     // 🛡️ ENHANCED: Advanced event deduplication with collision prevention
@@ -986,6 +1027,9 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
             userMessage: eventData.userMessage
           };
           
+          // Add the clean test completion log
+          console.log(`[BatchTestRunner] ${completionData.success ? '✅' : '❌'} Test completed: ${testName} - ${completionData.success ? 'PASSED' : 'FAILED'}`);
+          
           // 🛡️ ENHANCED: Use async atomic state update for completion with double-check
           const newStatus = completionData.success ? 'success' : 'failed';
           const success = await updateTestStateAtomic(testName, newStatus, completionData.summary, {
@@ -1002,9 +1046,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               // Ensure test is actually in the set before removing
               if (newSet.has(testName)) {
                 newSet.delete(testName);
-                console.log('[BatchTestRunner] 📊 Removed from currentlyRunning:', testName, 'Remaining:', Array.from(newSet));
-              } else {
-                console.log('[BatchTestRunner] ℹ️ Test not in currentlyRunning set:', testName);
               }
               
               return newSet;
@@ -1021,8 +1062,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   // Additional validation: ensure progress doesn't exceed 100%
                   const validatedProgress = Math.min(100, Math.max(0, newProgress));
                   setOverallProgress(validatedProgress);
-                  
-                  console.log(`[BatchTestRunner] 📊 Progress updated: ${validatedProgress}% (${testName} completed)`);
                 }
                 return currentResults;
               });
@@ -1174,8 +1213,6 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Initialize empty test states and cleanup on unmount
   useEffect(() => {
-    console.log('[BatchTestRunner] Component mounted - ready to run tests');
-    
     // Initialize skeleton test states for display
     const initialResults = {};
     const initialOutputs = {};
@@ -1193,9 +1230,12 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Update selectedTests when testQueue changes
   useEffect(() => {
-    console.log('[BatchTestRunner] DEBUG: testQueue changed:', testQueue);
-    console.log('[BatchTestRunner] DEBUG: deny-all in testQueue?', testQueue.includes('deny-all'));
-    setSelectedTests(new Set(testQueue));
+    // Extract string names from potential objects in testQueue
+    const testNameStrings = testQueue.map(testName => 
+      typeof testName === 'string' ? testName : 
+      (testName?.name || testName?.testName || String(testName || 'unknown-test'))
+    );
+    setSelectedTests(new Set(testNameStrings));
   }, [testQueue]);
 
   // 🕒 Status update interval for progressive status system - OPTIMIZED
@@ -1402,10 +1442,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Generate rich terminated display format for user-stopped tests
   const generateRichTerminatedDisplay = (testName, result) => {
+    // CRITICAL FIX: Ensure testName is always a string to prevent "[object Object]" display
+    const testNameString = typeof testName === 'string' ? testName : 
+                           (testName?.name || testName?.testName || String(testName || 'unknown-test'));
     const duration = result.duration || '0';
     
     return {
-      mainStatus: `🛑 ${testName} test terminated (${duration}s)`,
+      mainStatus: `🛑 ${testNameString} test terminated (${duration}s)`,
       details: [
         `📋 Test execution was stopped by user request`,
         `🔄 No diagnostic issues - test was manually terminated`,
@@ -1627,8 +1670,8 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         {/* Live Terminal Output Modal - CleanupButton Style */}
         {isRunning && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 animate-fade-in">
-            <div className="rounded-xl max-w-4xl mx-4 card-shadow-lg font-comfortaa" 
-                 style={{ backgroundColor: '#d4edda', padding: '17px', margin: '10px' }}>
+            <div className="max-w-4xl mx-4 card-shadow-lg font-comfortaa" 
+                 style={{ backgroundColor: '#d4edda', padding: '17px', margin: '10px', borderRadius: '5px' }}>
               <div className="text-center mb-6">
                 <h3 className="text-xl font-comfortaa font-bold text-gray-900 mb-2">
                   🚨 Live Test Execution Monitor
@@ -1683,9 +1726,18 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
       {/* Test Results Grid */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {testQueue.filter(testName => !hasStarted || selectedTests.has(testName)).map((testName) => {
-          const result = testResults[testName] || { status: 'queued', message: 'Waiting to start...' };
-          const outputs = testOutputs[testName] || [];
+        {testQueue.filter(testName => {
+          // Extract test name string for filtering
+          const testNameString = typeof testName === 'string' ? testName : 
+                                 (testName?.name || testName?.testName || String(testName || 'unknown-test'));
+          return !hasStarted || selectedTests.has(testNameString);
+        }).map((testName) => {
+          // Extract test name string from potential object
+          const testNameString = typeof testName === 'string' ? testName : 
+                                 (testName?.name || testName?.testName || String(testName || 'unknown-test'));
+          
+          const result = testResults[testNameString] || { status: 'queued', message: 'Waiting to start...' };
+          const outputs = testOutputs[testNameString] || [];
           const colorClass = getTestColorClass(testName);
           const icon = getTestIcon(testName);
           const statusIcon = getStatusIcon(result.status);
@@ -1693,14 +1745,14 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
           return (
             <div
-              key={testName}
-              className={`test-card border-2 card-shadow transition-all duration-300 ${colorClass} ${statusClass} ${!selectedTests.has(testName) && !hasStarted ? 'opacity-60' : ''}`}
+              key={testNameString}
+              className={`test-card border-2 card-shadow transition-all duration-300 ${colorClass} ${statusClass} ${!selectedTests.has(testNameString) && !hasStarted ? 'opacity-60' : ''}`}
               style={{ borderRadius: '5px', padding: '15px', margin: '10px', position: 'relative' }}
             >
               {/* Individual Test Selection Checkbox - Only when tests haven't started */}
               {!hasStarted && !isRunning && (
                 <button
-                  onClick={() => toggleTestSelection(testName)}
+                  onClick={() => toggleTestSelection(testNameString)}
                   className="hover-lift transition-all duration-200"
                   style={{
                     position: 'absolute',
@@ -1710,15 +1762,15 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                     height: '24px',
                     borderRadius: '4px',
                     border: '2px solid #000000',
-                    backgroundColor: selectedTests.has(testName) ? '#10b981' : '#ffffff',
+                    backgroundColor: selectedTests.has(testNameString) ? '#10b981' : '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     zIndex: 1000
                   }}
-                  title={selectedTests.has(testName) ? "Click to deselect this test" : "Click to select this test"}
+                  title={selectedTests.has(testNameString) ? "Click to deselect this test" : "Click to select this test"}
                 >
-                  {selectedTests.has(testName) ? (
+                  {selectedTests.has(testNameString) ? (
                     <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
                   ) : null}
                 </button>
@@ -1729,11 +1781,11 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                 <div className="flex-1 pr-8">
                   <h3 className="font-poppins font-semibold text-gray-900 flex items-center">
                     <span>{icon}</span>
-                    <span style={{ marginLeft: '5px' }}>{testName}</span>
-                    {currentlyRunning.has(testName) && (
+                    <span style={{ marginLeft: '5px' }}>{testNameString}</span>
+                    {currentlyRunning.has(testNameString) && (
                       <span style={{
                         marginLeft: '12px',
-                        backgroundColor: getStatusColor(testName),
+                        backgroundColor: getStatusColor(testNameString),
                         color: '#ffffff',
                         padding: '4px 8px',
                         borderRadius: '12px',
@@ -1742,7 +1794,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                         display: 'inline-block',
                         transition: 'background-color 0.3s ease-in-out'
                       }}>
-                        {getRunningStatusMessage(testName)}
+                        {getRunningStatusMessage(testNameString)}
                       </span>
                     )}
                   </h3>
@@ -1767,10 +1819,10 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   display: 'block',
                   position: 'relative'
                 }}>
-                  ./k8s_diagnostic test list: {testName} --verbose
+                  ./k8s_diagnostic test list: {testNameString} --verbose
                   <span 
                     title="Copy command to clipboard"
-                    onClick={() => copyCommandToClipboard(testName)}
+                    onClick={() => copyCommandToClipboard(testNameString)}
                     style={{
                       position: 'absolute',
                       right: '5px',
@@ -1824,9 +1876,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                 )}
                 
                 {result.status === 'success' && (() => {
-                  console.log('[BatchTestRunner] 🎯 Rendering SUCCESS for:', testName, 'Result:', result);
                   const richDisplay = generateRichSuccessDisplay(testName, result);
-                  console.log('[BatchTestRunner] 🎨 Rich display generated:', richDisplay);
                   return (
                     <div className="text-green-600">
                       <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4', marginTop: '10px' }}>
@@ -1939,7 +1989,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               <div className="font-poppins font-bold text-blue-600 flex items-center justify-center">
                 <span className="text-xl" style={{ marginRight: '10px' }}>📊</span>
                 <span className="text-2xl" style={{ marginRight: '10px' }}>
-                  {testQueue.length}
+                  {selectedTests.size}
                 </span>
                 <span className="text-sm">Total Tests</span>
               </div>

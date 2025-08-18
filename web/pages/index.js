@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import DiagnosticQuestions from '../components/DiagnosticQuestions';
 import BatchTestRunner from '../components/BatchTestRunner';
 import CleanupButton from '../components/CleanupButton';
+import CiliumConfigButton from '../components/CiliumConfigButton';
+import CiliumConfigModal from '../components/CiliumConfigModal';
 
 export default function Home() {
   const [testQueue, setTestQueue] = useState([]);
@@ -11,6 +13,9 @@ export default function Home() {
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [customSelectedTests, setCustomSelectedTests] = useState(new Set());
   const [copyFeedback, setCopyFeedback] = useState('');
+  const [showCiliumModal, setShowCiliumModal] = useState(false);
+  const [ciliumIsRunning, setCiliumIsRunning] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
 
   const handleTestQueueChange = (newQueue) => {
     setTestQueue(newQueue);
@@ -46,6 +51,27 @@ export default function Home() {
 
   const handleCleanupComplete = (success) => {
     console.log(`Cleanup completed with ${success ? 'success' : 'failure'}`);
+  };
+
+  const handleConfigComplete = (success, recommendedTests) => {
+    console.log(`Cilium config check completed with ${success ? 'success' : 'failure'}`);
+    
+    // If recommended tests are provided, set them as the test queue
+    if (success && recommendedTests && recommendedTests.length > 0) {
+      console.log('[Index] Setting recommended tests from Cilium config:', recommendedTests);
+      setTestQueue(recommendedTests);
+      setCurrentView('batch_runner');
+      setTestsComplete(false);
+      setShowCustomPicker(false);
+    }
+  };
+
+  const handleCiliumConfigClick = () => {
+    setShowCiliumModal(true);
+  };
+
+  const handleCloseCiliumModal = () => {
+    setShowCiliumModal(false);
   };
 
   const handleSurpriseMe = () => {
@@ -174,6 +200,37 @@ export default function Home() {
     }
   };
 
+  // Scroll tracking effect
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      setShowScrollTop(scrollTop > 300);
+    };
+
+    // Throttle scroll events for better performance
+    let ticking = false;
+    const throttledHandleScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          handleScroll();
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', throttledHandleScroll);
+    return () => window.removeEventListener('scroll', throttledHandleScroll);
+  }, []);
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  };
+
   return (
     <>
       <Head>
@@ -187,7 +244,7 @@ export default function Home() {
         {currentView === 'questions' ? (
           <div>
             {/* Header with Cleanup Button */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4">
+            <div className="bg-white border-b border-gray-200 px-6 py-4" style={{ marginBottom: '10px' }}>
               <div className="max-w-6xl mx-auto flex items-center justify-between">
                 <div>
                   <h1 className="text-2xl font-poppins font-bold text-gray-900">
@@ -214,6 +271,12 @@ export default function Home() {
                   >
                     🎯 I will pick the test myself
                   </button>
+                  <CiliumConfigButton 
+                    onConfigComplete={handleConfigComplete}
+                    disabled={false}
+                    isRunning={ciliumIsRunning}
+                    onConfigClick={handleCiliumConfigClick}
+                  />
                   <CleanupButton 
                     onCleanupComplete={handleCleanupComplete}
                     disabled={false}
@@ -411,6 +474,15 @@ export default function Home() {
               </div>
             )}
 
+            {/* Cilium Configuration Modal - Position it below the header */}
+            <CiliumConfigModal 
+              showModal={showCiliumModal}
+              onCloseModal={handleCloseCiliumModal}
+              onConfigComplete={handleConfigComplete}
+              isRunning={ciliumIsRunning}
+              setIsRunning={setCiliumIsRunning}
+            />
+
             {/* Main Content */}
             <DiagnosticQuestions onTestQueueChange={handleTestQueueChange} />
           </div>
@@ -456,6 +528,31 @@ export default function Home() {
                   ? testQueue.length 
                   : 'Select some tests'
             })
+          </button>
+        )}
+
+        {/* Scroll to Top Button */}
+        {showScrollTop && (
+          <button
+            onClick={scrollToTop}
+            className="scroll-top-btn font-comfortaa font-bold transition-all hover-lift card-shadow fade-in-up"
+            style={{ 
+              position: 'fixed',
+              bottom: '20px',
+              left: '20px',
+              zIndex: 99998,
+              padding: '12px', 
+              borderRadius: '50%',
+              width: '50px',
+              height: '50px',
+              fontSize: '20px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="Scroll to top"
+          >
+            ↑
           </button>
         )}
       </main>

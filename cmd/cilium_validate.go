@@ -51,23 +51,75 @@ var ciliumValidateCmd = &cobra.Command{
 			os.Exit(2)
 		}
 
-		fmt.Println("Validating Cilium feature prerequisites...")
+		fmt.Println("🛡️ Cilium Feature Status Check")
 
-		failed := 0
+		enabled := 0
+		available := 0
+
 		for _, feature := range features {
 			if err := system.ValidateFeatureByName(ctx, feature); err != nil {
-				fmt.Printf("[%s] FAIL: %s\n", feature, err.Error())
-				failed++
+				displayName := getFeatureDisplayName(feature)
+				status := getSimpleStatus(err.Error())
+				fmt.Printf("💡 %s - %s\n", displayName, status)
+				available++
 			} else {
-				fmt.Printf("[%s] OK\n", feature)
+				displayName := getFeatureDisplayName(feature)
+				fmt.Printf("✅ %s - Active & Working\n", displayName)
+				enabled++
 			}
 		}
 
-		if failed > 0 {
-			fmt.Printf("\n%d feature(s) failed validation\n", failed)
-			os.Exit(1)
+		fmt.Printf("\n📊 Summary: %d features active | %d features available\n", enabled, available)
+
+		if available > 0 {
+			fmt.Printf("ℹ️  %d additional features can be enabled if needed\n", available)
 		}
 	},
+}
+
+// getFeatureDisplayName converts feature names to user-friendly display names
+func getFeatureDisplayName(featureName string) string {
+	displayNames := map[string]string{
+		"bgp-control-plane":             "BGP Control Plane",
+		"dns-policies":                  "DNS-based Policies",
+		"egress-gateway":                "Egress Gateway",
+		"gateway-api":                   "Gateway API Support",
+		"host-firewall":                 "Host Firewall",
+		"ipsec":                         "IPsec Encryption",
+		"kube-proxy-replacement-strict": "Kube-proxy Replacement (Strict)",
+		"l2-announcements":              "L2 Load Balancer Announcements",
+		"nodeport":                      "NodePort Services",
+		"wireguard":                     "WireGuard Encryption",
+	}
+
+	if displayName, exists := displayNames[featureName]; exists {
+		return displayName
+	}
+
+	// Fallback: convert kebab-case to Title Case
+	parts := strings.Split(featureName, "-")
+	for i, part := range parts {
+		if len(part) > 0 {
+			parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// getSimpleStatus converts technical error messages to user-friendly status
+func getSimpleStatus(errorMessage string) string {
+	errorLower := strings.ToLower(errorMessage)
+
+	switch {
+	case strings.Contains(errorLower, "not met"):
+		return "Not Enabled"
+	case strings.Contains(errorLower, "enable"):
+		return "Requires Configuration"
+	case strings.Contains(errorLower, "prerequisite"):
+		return "Prerequisites Missing"
+	default:
+		return "Available"
+	}
 }
 
 func init() {
