@@ -1,0 +1,41 @@
+# Binaries
+k8s_diagnostic*
+*.exe
+
+# Node.js artifacts
+web/node_modules/
+web/.next/
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
+
+# Test results and logs
+test_results/*.json
+test_results/logs/*.log
+
+# Git and version control
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Build artifacts
+dist/
+*.tar.gz
+# Note: build/ directory needed for Docker CLI container build

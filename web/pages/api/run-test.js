@@ -77,17 +77,46 @@ export default function handler(req, res) {
     testId: testId || Date.now().toString()
   })}\n\n`);
 
-  // Change to the project root directory (one level up from web/)
-  const projectRoot = path.resolve(process.cwd(), '..');
+  // Use mounted volume paths or local development paths
+  const getProjectRoot = () => {
+    return process.env.SHARED_VOLUME_PATH 
+      ? path.join(process.env.SHARED_VOLUME_PATH, 'repository')
+      : path.resolve(process.cwd(), '..');  // Local development
+  };
+
+  const projectRoot = getProjectRoot();
   
   console.log(`[API] SPAWNING: CLI process for test ${testId} - Command: ${command} ${args.join(' ')}`);
   
-  // Start the CLI process
-  const childProcess = spawn(command, args, {
-    cwd: projectRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env }
-  });
+  // Check if running in Docker environment
+  const isDockerEnvironment = process.env.SHARED_VOLUME_PATH !== undefined;
+  
+  let childProcess;
+  if (isDockerEnvironment) {
+    // Spawn CLI container instead of local binary
+    console.log(`[API] DOCKER MODE: Running CLI in container`);
+    childProcess = spawn('docker', [
+      'compose',
+      '--profile', 'cli', 
+      'run', '--rm',
+      '-e', `BATCH_TEST_ID=${testId}`,
+      'k8s-diagnostic-cli',
+      'test',  // Remove './k8s_diagnostic' prefix
+      ...args.slice(1)
+    ], {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+  } else {
+    // Local development - run binary directly
+    console.log(`[API] LOCAL MODE: Running local binary`);
+    childProcess = spawn(command, args, {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+  }
 
   // Function to clear running test state
   const clearRunningTest = () => {
@@ -373,7 +402,10 @@ export default function handler(req, res) {
 
 // Helper function to find the latest results file
 async function findLatestResultsFile(projectRoot) {
-  const resultsDir = path.join(projectRoot, 'test_results');
+  // Use shared volume path if available for results directory
+  const resultsDir = process.env.SHARED_VOLUME_PATH 
+    ? path.join(process.env.SHARED_VOLUME_PATH, 'repository', 'test_results')
+    : path.join(projectRoot, 'test_results');
   
   try {
     const files = await fs.promises.readdir(resultsDir);

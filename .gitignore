@@ -6,8 +6,12 @@ k8s-diagnostic
 k8s_diagnostic
 /k8s-diagnostic
 /k8s_diagnostic
+k8s-diagnostic-linux
+k8s-diagnostic-macos
+k8s-diagnostic-*
 build/k8s-diagnostic
 build/k8s_diagnostic
+build/k8s-diagnostic-*
 
 # Generic binaries for programs and plugins
 *.exe
@@ -100,6 +104,9 @@ out/
 
 # Test results and logs (but keep .gitkeep)
 test_results/*.json
+test_results/**/*.json
+test_results/*.log
+test_results/**/*.log
 test_results/logs/
 !test_results/.gitkeep
 

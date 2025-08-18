@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 )
@@ -182,27 +183,54 @@ type MultiChannelLogger struct {
 
 // NewMultiChannelLogger creates a new multi-channel logger system
 func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger, error) {
+	// DEBUG: Add console debugging to track execution flow
+	fmt.Printf("DEBUG: NewMultiChannelLogger starting (namespace=%s, verbose=%t)\n", namespace, verbose)
+
 	// Create shared timestamp for consistent file naming
+	fmt.Printf("DEBUG: Creating shared timestamp...\n")
 	sharedTime := NewSharedTimestamp()
+	fmt.Printf("DEBUG: Shared timestamp created\n")
 
 	// Create verbose logger (existing system) - disable console output, let multi-channel logger control it
+	fmt.Printf("DEBUG: Creating verbose logger...\n")
 	verboseLogger, err := NewLoggerWithSharedTimestamp(sharedTime, false, DEBUG)
 	if err != nil {
+		fmt.Printf("DEBUG: Failed to create verbose logger: %v\n", err)
 		return nil, fmt.Errorf("failed to create verbose logger: %v", err)
 	}
+	fmt.Printf("DEBUG: Verbose logger created successfully\n")
 
-	// Generate a test ID for HTTP logging (using timestamp for uniqueness)
-	testID := fmt.Sprintf("%d", time.Now().UnixNano()/1000000) // Millisecond timestamp
+	// CRITICAL FIX: Conditional HTTP logger creation based on environment
+	var httpLogger *HTTPLogger
 
-	// Create HTTP logger (new system) - replaces FrontendJSONLogger
-	httpLogger, err := NewHTTPLogger(testID)
-	if err != nil {
-		verboseLogger.Close()
-		return nil, fmt.Errorf("failed to create HTTP logger: %v", err)
+	// Check if HTTP_LOG_URL is configured (UI integration mode)
+	fmt.Printf("DEBUG: Checking UI integration mode...\n")
+	if isUIIntegrationMode() {
+		fmt.Printf("DEBUG: UI integration mode detected - creating full HTTP logger\n")
+		// Generate a test ID for HTTP logging (using timestamp for uniqueness)
+		testID := fmt.Sprintf("%d", time.Now().UnixNano()/1000000) // Millisecond timestamp
+
+		// Create HTTP logger (new system) - replaces FrontendJSONLogger
+		httpLogger, err = NewHTTPLogger(testID)
+		if err != nil {
+			verboseLogger.Close()
+			return nil, fmt.Errorf("failed to create HTTP logger: %v", err)
+		}
+
+		// Log HTTP logger initialization
+		verboseLogger.LogInfo("HTTP logger initialized with testID: %s", testID)
+	} else {
+		fmt.Printf("DEBUG: Standalone Docker mode detected - creating minimal no-op logger\n")
+		// Standalone Docker mode - create minimal no-op HTTP logger
+		httpLogger = NewNoOpHTTPLogger()
+		verboseLogger.LogInfo("Standalone mode detected - using minimal logging")
 	}
+	fmt.Printf("DEBUG: HTTP logger created successfully\n")
 
 	// Create progress tracker
+	fmt.Printf("DEBUG: Creating progress tracker...\n")
 	progress := NewProgressTracker()
+	fmt.Printf("DEBUG: Progress tracker created\n")
 
 	logger := &MultiChannelLogger{
 		verboseLogger: verboseLogger,
@@ -213,12 +241,51 @@ func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger,
 		namespace:     namespace,
 	}
 
-	// Log initialization to both channels
+	// Log initialization
 	logger.verboseLogger.LogInfo("Multi-channel logging system initialized")
 	logger.verboseLogger.LogInfo("Verbose log: %s", sharedTime.GetLogFilePath())
-	logger.verboseLogger.LogInfo("HTTP logger initialized with testID: %s", testID)
 
+	fmt.Printf("DEBUG: NewMultiChannelLogger completed successfully\n")
 	return logger, nil
+}
+
+// isUIIntegrationMode detects if we're running in UI integration mode
+func isUIIntegrationMode() bool {
+	// Check for explicit HTTP_LOG_URL configuration
+	if httpURL := os.Getenv("HTTP_LOG_URL"); httpURL != "" {
+		return true
+	}
+
+	// Check for Docker container environment without UI integration
+	if isDockerContainer() && !hasUIIntegration() {
+		return false
+	}
+
+	// Default to UI integration mode for backward compatibility
+	return true
+}
+
+// isDockerContainer detects if we're running inside a Docker container
+func isDockerContainer() bool {
+	// Check for Docker environment indicators
+	if os.Getenv("DOCKER_CONTAINER") == "true" {
+		return true
+	}
+
+	// Check for container runtime indicators
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+
+	return false
+}
+
+// hasUIIntegration checks if UI integration is explicitly configured
+func hasUIIntegration() bool {
+	// Check for UI-specific environment variables
+	return os.Getenv("HTTP_LOG_URL") != "" ||
+		os.Getenv("BATCH_TEST_ID") != "" ||
+		os.Getenv("ENABLE_UI_INTEGRATION") == "true"
 }
 
 // Suite level logging methods

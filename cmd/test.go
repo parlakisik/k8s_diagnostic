@@ -545,7 +545,6 @@ func validateIndividualTests(testNames []string) []string {
 		// CRITICAL FIX: Always prioritize exact test ID matches over aliases
 		// This prevents "pod-node-name" from being confused with "node" alias
 		if _, exists := availableTests[testName]; exists {
-			fmt.Printf("DEBUG: Found direct test match: %s\n", testName)
 			validTests = append(validTests, testName)
 		} else if aliasedTests, isAlias := testAliases[testName]; isAlias {
 			// Only expand aliases for names that are NOT direct test IDs
@@ -835,6 +834,11 @@ func getL7SubgroupForTest(testId string) string {
 
 // ensureBinaryIsUpToDate checks if the k8s_diagnostic binary needs to be rebuilt
 func ensureBinaryIsUpToDate() error {
+	// Skip auto-rebuild in Docker containers or when explicitly disabled
+	if os.Getenv("DISABLE_AUTO_REBUILD") == "true" || os.Getenv("DOCKER_CONTAINER") == "true" {
+		return nil
+	}
+
 	binaryPath := "k8s-diagnostic"
 
 	// Check if binary exists

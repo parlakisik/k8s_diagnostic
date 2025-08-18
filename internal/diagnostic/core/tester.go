@@ -63,8 +63,13 @@ func NewTester(kubeconfig, namespace string, verbose bool) (*Tester, error) {
 	} else {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			// Try to use default kubeconfig
-			config, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+			// Check KUBECONFIG environment variable first
+			if kubeconfigEnv := os.Getenv("KUBECONFIG"); kubeconfigEnv != "" {
+				config, err = clientcmd.BuildConfigFromFlags("", kubeconfigEnv)
+			} else {
+				// Try to use default kubeconfig
+				config, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
+			}
 		}
 	}
 

@@ -1,0 +1,28 @@
+FROM golang:1.21-alpine AS builder
+WORKDIR /app
+
+# Configure Go build environment for reliability and static linking
+ENV GOPROXY=https://proxy.golang.org,direct \
+    GOSUMDB=sum.golang.org \
+    CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+RUN apk add --no-cache git ca-certificates
+COPY go.mod go.sum ./
+COPY . .
+
+# Build with fallback: try readonly first, then download modules if needed
+RUN go build -mod=readonly -o k8s-diagnostic . || (go mod download && go build -o k8s-diagnostic .)
+
+FROM alpine:latest
+RUN apk --no-cache add curl ca-certificates
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+    && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+WORKDIR /app
+COPY --from=builder /app/k8s-diagnostic .
+
+ENTRYPOINT ["./k8s-diagnostic"]
