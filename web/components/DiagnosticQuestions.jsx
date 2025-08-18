@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const DIAGNOSTIC_QUESTIONS = [
   {
@@ -123,11 +123,25 @@ const getColorClass = (color) => {
   return colorMap[color] || 'test-card-networking';
 };
 
-export default function DiagnosticQuestions({ onTestQueueChange }) {
+export default function DiagnosticQuestions({ onTestQueueChange, resetTrigger }) {
   const [testQueue, setTestQueue] = useState([]);
   const [selectedQuestions, setSelectedQuestions] = useState(new Set());
   const [allDiscoveredTests, setAllDiscoveredTests] = useState([]);
   const [copyFeedback, setCopyFeedback] = useState('');
+
+  // Reset internal state when parent requests it
+  useEffect(() => {
+    if (resetTrigger) {
+      setTestQueue([]);
+      setSelectedQuestions(new Set());
+      setAllDiscoveredTests([]);
+      setCopyFeedback('');
+      // Notify parent that queue is cleared
+      if (onTestQueueChange) {
+        onTestQueueChange([]);
+      }
+    }
+  }, [resetTrigger, onTestQueueChange]);
 
   const updateTestQueue = (newQueue) => {
     setTestQueue(newQueue);
@@ -228,13 +242,6 @@ export default function DiagnosticQuestions({ onTestQueueChange }) {
             >
               📋 {testQueue.length} tests selected
             </div>
-            <button
-              onClick={clearAllTests}
-              className="btn-outline font-comfortaa hover-lift"
-              style={{ margin: '10px', padding: '10px', borderRadius: '5px', display: 'inline-block' }}
-            >
-              🗑️ Clear All
-            </button>
           </div>
         </div>
       )}

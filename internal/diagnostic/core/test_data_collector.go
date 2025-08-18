@@ -470,13 +470,7 @@ func (c *TestDataCollector) generateSuccessContext() *UserTestContext {
 
 // LogUserStepHTTP sends user-friendly messages directly to HTTP API for real-time frontend updates
 func (c *TestDataCollector) LogUserStepHTTP(phase, status, title, description, context string, hints []string, technicalData map[string]interface{}) error {
-	fmt.Printf("[DEBUG COLLECTOR] 🌐 LogUserStepHTTP called\n")
-	fmt.Printf("[DEBUG COLLECTOR] 📋 Params: phase=%s, status=%s, title=%s\n", phase, status, title)
-	fmt.Printf("[DEBUG COLLECTOR] 🔧 HTTP Config: client=%v, url=%s, testId=%s\n",
-		c.httpClient != nil, c.webServerURL, c.testId)
-
 	if c.httpClient == nil || c.webServerURL == "" || c.testId == "" {
-		fmt.Printf("[DEBUG COLLECTOR] ❌ HTTP not configured, skipping message (HTTP API is primary method)\n")
 		return nil
 	}
 
@@ -497,9 +491,6 @@ func (c *TestDataCollector) LogUserStepHTTP(phase, status, title, description, c
 		"userMessage":      userMsg,
 		"technicalDetails": technicalData,
 	}
-
-	fmt.Printf("[DEBUG COLLECTOR] 📦 Payload created: %+v\n", payload)
-	fmt.Printf("[DEBUG COLLECTOR] 🚀 Sending HTTP request to log-events API\n")
 
 	// Send HTTP POST to log-events API asynchronously to avoid blocking test execution
 	go c.sendToHTTPAPI(payload)

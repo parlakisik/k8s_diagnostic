@@ -161,13 +161,76 @@ export default function CiliumConfigModal({
     }
   };
 
+  // Smart deduplication function to merge tests with same name
+  const deduplicateAndMergeTests = (tests1 = [], tests2 = []) => {
+    const testMap = new Map();
+    
+    // Helper function to add or merge test
+    const addOrMergeTest = (test) => {
+      const testName = test.name || test.testName || '';
+      if (!testName) return;
+      
+      if (testMap.has(testName)) {
+        // Merge with existing test
+        const existing = testMap.get(testName);
+        
+        // Combine reasons intelligently
+        const existingReason = existing.reason || existing.rationale || '';
+        const newReason = test.reason || test.rationale || '';
+        
+        let combinedReason = '';
+        if (existingReason && newReason && existingReason !== newReason) {
+          combinedReason = `${existingReason} • ${newReason}`;
+        } else {
+          combinedReason = existingReason || newReason;
+        }
+        
+        // Combine descriptions
+        const existingDesc = existing.description || existing.summary || '';
+        const newDesc = test.description || test.summary || '';
+        const combinedDesc = existingDesc || newDesc || 'Validates core networking functionality';
+        
+        // Update the existing test with merged data
+        testMap.set(testName, {
+          ...existing,
+          ...test, // New test data takes precedence for most fields
+          reason: combinedReason,
+          rationale: combinedReason, // Ensure both fields are updated
+          description: combinedDesc,
+          summary: combinedDesc
+        });
+      } else {
+        // Add new test
+        testMap.set(testName, { ...test });
+      }
+    };
+    
+    // Process all tests from both arrays
+    [...tests1, ...tests2].forEach(addOrMergeTest);
+    
+    // Return deduplicated array
+    return Array.from(testMap.values());
+  };
+
   const runRecommendedTests = () => {
-    if (insights && insights.recommendedTests.length > 0) {
-      // This would integrate with the existing test runner
-      // For now, just close the modal and let parent handle it
+    // Smart deduplication: merge tests with same name and combine their reasons
+    const allRecommendedTests = deduplicateAndMergeTests(
+      validationData?.summary?.recommendedTests || [], 
+      insights?.recommendedTests || []
+    );
+    
+    console.log('[CiliumConfigModal] Deduplicated tests:', allRecommendedTests);
+    
+    if (allRecommendedTests.length > 0) {
+      // Extract just the test names (strings) for the batch runner
+      const testNames = allRecommendedTests.map(test => test.name || test.testName).filter(Boolean);
+      
+      console.log('[CiliumConfigModal] Extracted test names:', testNames);
+      
+      // Close modal and pass clean test names to parent
       onCloseModal();
       if (onConfigComplete) {
-        onConfigComplete(true, insights.recommendedTests);
+        onConfigComplete(true, testNames);
       }
     }
   };
@@ -227,7 +290,7 @@ export default function CiliumConfigModal({
   };
 
   const getStatusIcon = (isEnabled) => {
-    return isEnabled ? '✅' : '💡';
+    return isEnabled ? '✅' : '⚠️';
   };
 
   const getStatusBadge = (isEnabled) => {
@@ -409,7 +472,7 @@ export default function CiliumConfigModal({
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
             <div className="flex items-center">
-              <span className="text-red-500 text-xl mr-3">❌</span>
+              <span className="text-red-500 text-xl" style={{ marginRight: '5px' }}>❌</span>
               <div>
                 <div className="font-inter font-semibold text-red-800">Configuration Error</div>
                 <div className="font-inter text-red-700 text-sm">{error}</div>
@@ -545,7 +608,7 @@ export default function CiliumConfigModal({
                     </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <div className="flex items-center">
-                        <span className="text-blue-600 text-xl" style={{ marginRight: '5px' }}>💡</span>
+                        <span className="text-blue-600 text-xl" style={{ marginRight: '5px' }}>⚠️</span>
                         <span className="font-inter text-blue-700 text-sm" style={{ marginRight: '7px' }}>Available to Enable:</span>
                         <span className="font-poppins font-bold text-blue-800 text-2xl">
                           {validationData.summary.availableCount || 0}
@@ -558,30 +621,41 @@ export default function CiliumConfigModal({
                   {validationData.summary.enabledFeatures && validationData.summary.enabledFeatures.length > 0 && (
                     <div>
                       <h4 className="font-poppins font-bold text-gray-800 text-lg mb-4 flex items-center">
-                        <span className="text-green-600 text-lg mr-2">✅</span>
+                        <span className="text-green-600 text-lg" style={{ marginRight: '5px' }}>✅</span>
                         Active Features ({validationData.summary.enabledFeatures.length})
                       </h4>
-                      <div className="grid grid-cols-1 gap-3">
+                      <div className="space-y-4" style={{ marginTop: '15px' }}>
                         {validationData.summary.enabledFeatures.map((feature, index) => (
-                          <div key={index} className="bg-white border border-green-200 rounded-lg p-4">
-                            <div className="flex items-center">
-                              <span className="text-green-600 text-lg mr-3">✅</span>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="font-inter font-bold text-gray-800 text-base">
-                                    {getFeatureDisplayName(feature)}
-                                  </div>
-                                  <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full">
-                                    {getFeatureCategory(feature)}
-                                  </span>
-                                </div>
-                                <div className="font-inter text-gray-600 text-sm mt-1">
-                                  {getFeatureDescription(feature)}
-                                </div>
-                                <div className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full inline-block mt-2">
-                                  Active & Working
-                                </div>
-                              </div>
+                          <div key={index} style={{ marginBottom: '15px' }}>
+                            {/* Line 1: Emoji + Feature Name + Category (all bold) */}
+                            <div className="font-inter font-black text-gray-800 text-base" style={{ marginBottom: '2px', fontWeight: '900' }}>
+                              <span className="text-green-600" style={{ marginRight: '5px' }}>✅</span>
+                              {getFeatureDisplayName(feature)} - {getFeatureCategory(feature)}
+                            </div>
+                            {/* Line 2: Description */}
+                            <div className="font-inter text-gray-600 text-sm" style={{ marginBottom: '2px' }}>
+                              {getFeatureDescription(feature)}
+                            </div>
+                            {/* Line 3: Configuration (for active features, show what's enabled) */}
+                            <div className="font-inter text-sm" style={{ marginBottom: '2px' }}>
+                              <span className="font-black" style={{ fontWeight: '900' }}>Status: </span>
+                              <span style={{
+                                color: 'rgb(34, 197, 94)',
+                                fontWeight: '600',
+                                backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                                padding: '4px 12px',
+                                borderRadius: '9999px',
+                                fontSize: '0.875rem',
+                                fontFamily: 'monospace',
+                                whiteSpace: 'nowrap',
+                                flexShrink: '0'
+                              }}>
+                                Enabled and Active
+                              </span>
+                            </div>
+                            {/* Line 4: Working Status */}
+                            <div className="font-inter text-green-600 text-sm">
+                              Active & Working
                             </div>
                           </div>
                         ))}
@@ -593,7 +667,7 @@ export default function CiliumConfigModal({
                   {validationData.summary.availableFeatures && validationData.summary.availableFeatures.length > 0 && (
                     <div>
                       <h4 className="font-poppins font-bold text-gray-800 text-lg mb-4 flex items-center">
-                        <span className="text-blue-600 text-lg mr-2">💡</span>
+                        <span className="text-blue-600 text-lg" style={{ marginRight: '5px' }}>⚠️</span>
                         Available Features ({validationData.summary.availableFeatures.length})
                       </h4>
                       <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
@@ -602,32 +676,52 @@ export default function CiliumConfigModal({
                           These features are not currently enabled but are available for configuration if needed.
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-3">
+                      <div className="space-y-4" style={{ marginTop: '15px' }}>
                         {validationData.summary.availableFeatures.map((feature, index) => (
-                          <div key={index} className="bg-white border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-center">
-                              <span className="text-blue-600 text-lg mr-3">💡</span>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <div className="font-inter font-bold text-gray-800 text-base">
-                                    {getFeatureDisplayName(feature.name)}
-                                  </div>
-                                  <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full">
-                                    {getFeatureCategory(feature.name)}
-                                  </span>
-                                </div>
-                                <div className="font-inter text-gray-600 text-sm mt-1">
-                                  {getFeatureDescription(feature.name)}
-                                </div>
-                                {feature.requirement && (
-                                  <div className="bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded mt-2 font-mono">
-                                    Requires: {feature.requirement}
-                                  </div>
-                                )}
-                                <div className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full inline-block mt-2">
-                                  Not Enabled
-                                </div>
+                          <div key={index} style={{ marginBottom: '15px' }}>
+                            {/* Line 1: Emoji + Feature Name + Category (all bold) */}
+                            <div className="font-inter font-black text-gray-800 text-base" style={{ marginBottom: '2px', fontWeight: '900' }}>
+                              <span className="text-blue-600" style={{ marginRight: '5px' }}>⚠️</span>
+                              {getFeatureDisplayName(feature)} - {getFeatureCategory(feature)}
+                            </div>
+                            {/* Line 2: Description */}
+                            <div className="font-inter text-gray-600 text-sm" style={{ marginBottom: '2px' }}>
+                              {getFeatureDescription(feature)}
+                            </div>
+                            {/* Line 3: Requirements (styled) */}
+                            {feature.requirement && (
+                              <div className="font-inter text-sm" style={{ marginBottom: '2px' }}>
+                                <span className="font-black" style={{ fontWeight: '900' }}>Requires: </span>
+                                <span style={{
+                                  color: 'rgb(217, 119, 6)',
+                                  fontWeight: '600',
+                                  backgroundColor: 'rgba(217, 119, 6, 0.1)',
+                                  padding: '4px 12px',
+                                  borderRadius: '9999px',
+                                  fontSize: '0.875rem',
+                                  fontFamily: 'monospace',
+                                  whiteSpace: 'nowrap',
+                                  flexShrink: '0'
+                                }}>
+                                  {feature.requirement}
+                                </span>
                               </div>
+                            )}
+                            {/* Line 4: Status */}
+                            <div className="font-inter text-sm">
+                              <span style={{
+                                color: 'rgb(239, 68, 68)',
+                                fontWeight: '600',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                padding: '4px 12px',
+                                borderRadius: '9999px',
+                                fontSize: '0.875rem',
+                                fontFamily: 'monospace',
+                                whiteSpace: 'nowrap',
+                                flexShrink: '0'
+                              }}>
+                                Not Enabled
+                              </span>
                             </div>
                           </div>
                         ))}
@@ -649,7 +743,7 @@ export default function CiliumConfigModal({
                         </span>
                       </div>
                       <div className="flex items-center text-sm">
-                        <span className="text-blue-600" style={{ marginRight: '5px' }}>💡</span>
+                        <span className="text-blue-600" style={{ marginRight: '5px' }}>⚠️</span>
                         <span className="font-inter text-gray-700">
                           {validationData.summary.availableCount || 0} additional features can be enabled if needed
                         </span>
@@ -664,7 +758,8 @@ export default function CiliumConfigModal({
                   </div>
 
                   {/* Recommended Tests */}
-                  {insights && insights.recommendedTests && insights.recommendedTests.length > 0 && (
+                  {((validationData && validationData.summary && validationData.summary.recommendedTests && validationData.summary.recommendedTests.length > 0) || 
+                    (insights && insights.recommendedTests && insights.recommendedTests.length > 0)) && (
                     <div className="border-t border-gray-200 pt-4">
                       {/* Test Recommendations List */}
                       <div className="mb-4">
@@ -674,12 +769,15 @@ export default function CiliumConfigModal({
                         </h4>
                         <div className="bg-blue-50 border border-blue-100 rounded-lg p-3" style={{ marginBottom: '15px' }}>
                           <div className="text-blue-800 text-sm flex items-center">
-                            <span style={{ marginRight: '5px' }}>💡</span>
+                            <span style={{ marginRight: '5px' }}>⚠️</span>
                             Based on your current Cilium configuration, we recommend running these tests to validate your setup:
                           </div>
                         </div>
                         <div>
-                          {insights.recommendedTests.map((test, index) => (
+                          {deduplicateAndMergeTests(
+                            validationData?.summary?.recommendedTests || [], 
+                            insights?.recommendedTests || []
+                          ).map((test, index) => (
                             <div key={index} style={{ marginBottom: '15px' }}>
                               {/* Line 1: Icon + Test Name */}
                               <div style={{ display: 'flex', alignItems: 'center', paddingLeft: '0px !important', marginLeft: '0px !important' }}>
@@ -722,7 +820,10 @@ export default function CiliumConfigModal({
                           className="surprise-btn rounded-xl font-comfortaa font-semibold transition-all hover-lift card-shadow"
                           style={{ padding: '12px 24px', borderRadius: '5px' }}
                         >
-                          🚀 Run Recommended Tests ({insights.recommendedTests.length})
+                          🚀 Run Recommended Tests ({deduplicateAndMergeTests(
+                            validationData?.summary?.recommendedTests || [], 
+                            insights?.recommendedTests || []
+                          ).length})
                         </button>
                       </div>
                     </div>

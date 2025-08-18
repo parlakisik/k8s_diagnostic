@@ -183,30 +183,20 @@ type MultiChannelLogger struct {
 
 // NewMultiChannelLogger creates a new multi-channel logger system
 func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger, error) {
-	// DEBUG: Add console debugging to track execution flow
-	fmt.Printf("DEBUG: NewMultiChannelLogger starting (namespace=%s, verbose=%t)\n", namespace, verbose)
-
 	// Create shared timestamp for consistent file naming
-	fmt.Printf("DEBUG: Creating shared timestamp...\n")
 	sharedTime := NewSharedTimestamp()
-	fmt.Printf("DEBUG: Shared timestamp created\n")
 
 	// Create verbose logger (existing system) - disable console output, let multi-channel logger control it
-	fmt.Printf("DEBUG: Creating verbose logger...\n")
 	verboseLogger, err := NewLoggerWithSharedTimestamp(sharedTime, false, DEBUG)
 	if err != nil {
-		fmt.Printf("DEBUG: Failed to create verbose logger: %v\n", err)
 		return nil, fmt.Errorf("failed to create verbose logger: %v", err)
 	}
-	fmt.Printf("DEBUG: Verbose logger created successfully\n")
 
 	// CRITICAL FIX: Conditional HTTP logger creation based on environment
 	var httpLogger *HTTPLogger
 
 	// Check if HTTP_LOG_URL is configured (UI integration mode)
-	fmt.Printf("DEBUG: Checking UI integration mode...\n")
 	if isUIIntegrationMode() {
-		fmt.Printf("DEBUG: UI integration mode detected - creating full HTTP logger\n")
 		// Generate a test ID for HTTP logging (using timestamp for uniqueness)
 		testID := fmt.Sprintf("%d", time.Now().UnixNano()/1000000) // Millisecond timestamp
 
@@ -220,17 +210,13 @@ func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger,
 		// Log HTTP logger initialization
 		verboseLogger.LogInfo("HTTP logger initialized with testID: %s", testID)
 	} else {
-		fmt.Printf("DEBUG: Standalone Docker mode detected - creating minimal no-op logger\n")
 		// Standalone Docker mode - create minimal no-op HTTP logger
 		httpLogger = NewNoOpHTTPLogger()
 		verboseLogger.LogInfo("Standalone mode detected - using minimal logging")
 	}
-	fmt.Printf("DEBUG: HTTP logger created successfully\n")
 
 	// Create progress tracker
-	fmt.Printf("DEBUG: Creating progress tracker...\n")
 	progress := NewProgressTracker()
-	fmt.Printf("DEBUG: Progress tracker created\n")
 
 	logger := &MultiChannelLogger{
 		verboseLogger: verboseLogger,
@@ -245,7 +231,6 @@ func NewMultiChannelLogger(namespace string, verbose bool) (*MultiChannelLogger,
 	logger.verboseLogger.LogInfo("Multi-channel logging system initialized")
 	logger.verboseLogger.LogInfo("Verbose log: %s", sharedTime.GetLogFilePath())
 
-	fmt.Printf("DEBUG: NewMultiChannelLogger completed successfully\n")
 	return logger, nil
 }
 

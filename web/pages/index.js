@@ -22,22 +22,22 @@ export default function Home() {
   };
 
   const handleRunSelectedTests = () => {
-    console.log('[Index] Run Selected Tests button clicked!');
     
     // Check if we're in custom picker mode with selected tests
     if (showCustomPicker && customSelectedTests.size > 0) {
-      console.log('[Index] Running custom selected tests:', Array.from(customSelectedTests));
       setTestQueue(Array.from(customSelectedTests));
       setCurrentView('batch_runner');
       setTestsComplete(false);
       setShowCustomPicker(false);
     } else if (testQueue.length > 0) {
-      console.log('[Index] Running diagnostic questions tests:', testQueue);
       setCurrentView('batch_runner');
       setTestsComplete(false);
     } else {
-      console.log('[Index] No tests selected - not switching views');
     }
+  };
+
+  const handleCustomClearAll = () => {
+    setCustomSelectedTests(new Set());
   };
 
   const handleBackToQuestions = () => {
@@ -45,20 +45,16 @@ export default function Home() {
   };
 
   const handleBatchTestComplete = (success) => {
-    console.log(`Batch tests completed with ${success ? 'success' : 'some failures'}`);
     setTestsComplete(true);
   };
 
   const handleCleanupComplete = (success) => {
-    console.log(`Cleanup completed with ${success ? 'success' : 'failure'}`);
   };
 
   const handleConfigComplete = (success, recommendedTests) => {
-    console.log(`Cilium config check completed with ${success ? 'success' : 'failure'}`);
     
     // If recommended tests are provided, set them as the test queue
     if (success && recommendedTests && recommendedTests.length > 0) {
-      console.log('[Index] Setting recommended tests from Cilium config:', recommendedTests);
       setTestQueue(recommendedTests);
       setCurrentView('batch_runner');
       setTestsComplete(false);
@@ -75,7 +71,6 @@ export default function Home() {
   };
 
   const handleSurpriseMe = () => {
-    console.log('[Index] Surprise Me button clicked!');
     
     // The curated "Surprise Me" test suite (10 tests)
     const surpriseMeTests = [
@@ -90,8 +85,6 @@ export default function Home() {
       'tcp-port-egress',          // 9. tcp-port-egress - L4 single-port restriction
       'basic-http-get'            // 10. basic-http-get - L7 HTTP method/path enforcement
     ];
-    
-    console.log('[Index] Setting surprise me tests:', surpriseMeTests);
     
     // Set the test queue and immediately start the tests
     setTestQueue(surpriseMeTests);
@@ -174,10 +167,6 @@ export default function Home() {
   const handleCustomSelectAll = () => {
     const allTests = getAllUniqueTests();
     setCustomSelectedTests(new Set(allTests));
-  };
-
-  const handleCustomClearAll = () => {
-    setCustomSelectedTests(new Set());
   };
 
   const handleRunCustomTests = () => {
@@ -309,12 +298,14 @@ export default function Home() {
                   </button>
                   <button
                     onClick={handleCustomClearAll}
-                    className="font-comfortaa font-semibold hover-lift transition-all border-2 border-black bg-red-50 hover:bg-red-100 text-gray-800"
+                    className="font-comfortaa font-semibold hover-lift transition-all rounded-xl card-shadow"
                     style={{
                       padding: '8px 16px',
                       borderRadius: '5px',
                       marginRight: '7px',
-                      marginBottom: '7px'
+                      marginBottom: '7px',
+                      backgroundColor: '#facc15',
+                      border: 'none'
                     }}
                     title="Clear all selected tests"
                   >
@@ -484,7 +475,9 @@ export default function Home() {
             />
 
             {/* Main Content */}
-            <DiagnosticQuestions onTestQueueChange={handleTestQueueChange} />
+            <DiagnosticQuestions 
+              onTestQueueChange={handleTestQueueChange}
+            />
           </div>
         ) : (
           <BatchTestRunner
@@ -498,14 +491,15 @@ export default function Home() {
         <footer className="bg-gray-50 border-t border-gray-200 py-6 mt-12">
           <div className="max-w-6xl mx-auto px-6 text-center">
             <p className="text-gray-500 text-sm font-inter">
-              K8s Diagnostic Tool - Professional Network Policy Testing
+              Advanced Kubernetes Network Diagnostics Platform
             </p>
             <p className="text-gray-400 text-xs font-inter mt-1">
-              Built with Next.js, Tailwind CSS, and Go CLI backend
+              Comprehensive Cilium policy testing, network validation, and intelligent cluster analysis
             </p>
           </div>
         </footer>
         
+
         {/* Floating Action Button - Only show on questions page */}
         {currentView === 'questions' && (
           <button
@@ -555,6 +549,7 @@ export default function Home() {
             ↑
           </button>
         )}
+
       </main>
     </>
   );

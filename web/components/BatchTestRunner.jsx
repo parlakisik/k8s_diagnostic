@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getTestInsights } from '../utils/testInsights';
+import { TestDefinition, TestCollection, createTestCollection } from '../utils/testDefinitions';
 
 // Global bounce animation styles
 const bounceStyles = `
@@ -224,13 +225,9 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const [currentPhase, setCurrentPhase] = useState('');
   const [liveOutput, setLiveOutput] = useState([]);
   const [filteredOutput, setFilteredOutput] = useState([]);
-  // Initialize with all tests selected, extracting string names from potential objects
-  const [selectedTests, setSelectedTests] = useState(new Set(
-    testQueue.map(testName => 
-      typeof testName === 'string' ? testName : 
-      (testName?.name || testName?.testName || String(testName || 'unknown-test'))
-    )
-  ));
+  // ROBUST SOLUTION: Use TestCollection for proper test management
+  const [testCollection, setTestCollection] = useState(() => createTestCollection(testQueue));
+  const [selectedTests, setSelectedTests] = useState(new Set(testCollection.getAll().map(test => test.id)));
   const [backendError, setBackendError] = useState(null); // Track backend process errors
   const [connectionLost, setConnectionLost] = useState(false); // Track SSE connection status
   const [showCliCommands, setShowCliCommands] = useState(false); // CLI commands visibility toggle
@@ -418,12 +415,9 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       return;
     }
 
-    // CRITICAL FIX: Preserve original testQueue order for execution
-    // Filter testQueue to only include selected tests, maintaining original order
-    const selectedTestsList = testQueue
-      .map(testName => typeof testName === 'string' ? testName : 
-           (testName?.name || testName?.testName || String(testName || 'unknown-test')))
-      .filter(testName => selectedTests.has(testName));
+    // ROBUST SOLUTION: Use TestCollection to get execution names for selected tests
+    const selectedTestObjects = testCollection.getAll().filter(test => selectedTests.has(test.id));
+    const selectedTestsList = selectedTestObjects.map(test => test.getExecutionName());
     
     console.log('[BatchTestRunner] 🚀 Starting batch execution with test queue:', selectedTestsList);
     console.log('[BatchTestRunner] 📋 Original testQueue order preserved - tests will run in selection order');
@@ -1228,14 +1222,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     };
   }, []);
 
-  // Update selectedTests when testQueue changes
+  // Update test collection and selection when testQueue changes  
   useEffect(() => {
-    // Extract string names from potential objects in testQueue
-    const testNameStrings = testQueue.map(testName => 
-      typeof testName === 'string' ? testName : 
-      (testName?.name || testName?.testName || String(testName || 'unknown-test'))
-    );
-    setSelectedTests(new Set(testNameStrings));
+    console.log('[BatchTestRunner] Updating test collection with new testQueue:', testQueue);
+    const newCollection = createTestCollection(testQueue);
+    setTestCollection(newCollection);
+    // Auto-select all tests by default (use test IDs for proper selection)
+    setSelectedTests(new Set(newCollection.getAll().map(test => test.id)));
   }, [testQueue]);
 
   // 🕒 Status update interval for progressive status system - OPTIMIZED
@@ -1252,27 +1245,29 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     };
   }, [currentlyRunning.size]); // Dependencies: Only currentlyRunning.size (no circular dependency)
 
-  // Toggle individual test selection
-  const toggleTestSelection = (testName) => {
+  // Toggle individual test selection - ROBUST: Use test ID
+  const toggleTestSelection = (testId) => {
     setSelectedTests(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(testName)) {
-        newSet.delete(testName);
+      if (newSet.has(testId)) {
+        newSet.delete(testId);
       } else {
-        newSet.add(testName);
+        newSet.add(testId);
       }
       return newSet;
     });
   };
 
-  // Toggle all tests selection
+  // Toggle all tests selection - ROBUST: Use TestCollection
   const toggleAllTests = () => {
-    if (selectedTests.size === testQueue.length) {
+    const allTestIds = testCollection.getAll().map(test => test.id);
+    
+    if (selectedTests.size === allTestIds.length) {
       // All are selected, deselect all
       setSelectedTests(new Set());
     } else {
       // Some or none are selected, select all
-      setSelectedTests(new Set(testQueue));
+      setSelectedTests(new Set(allTestIds));
     }
   };
 
@@ -1514,7 +1509,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               🚀 Batch Test Execution
             </h1>
             <p className="text-lg font-inter text-gray-600">
-              Running {testQueue.length} diagnostic tests
+              Running {testCollection.size()} diagnostic tests
             </p>
           </div>
           
@@ -1552,7 +1547,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               title={hasStarted ? "Cannot change selection after tests have started" : 
                      (selectedTests.size === testQueue.length ? "Deselect all tests" : "Select all tests")}
             >
-              {selectedTests.size === testQueue.length ? '☐ Deselect All' : '☑️ Select All'} ({selectedTests.size}/{testQueue.length})
+              {selectedTests.size === testCollection.size() ? '☐ Deselect All' : '☑️ Select All'} ({selectedTests.size}/{testCollection.size()})
             </button>
 
             {/* 3. Start Tests / Run Again - Always visible, disabled when no tests selected or when running */}
@@ -1724,239 +1719,241 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         )}
       </div>
 
-      {/* Test Results Grid */}
+      {/* Test Results Grid - ROBUST: Use TestCollection */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {testQueue.filter(testName => {
-          // Extract test name string for filtering
-          const testNameString = typeof testName === 'string' ? testName : 
-                                 (testName?.name || testName?.testName || String(testName || 'unknown-test'));
-          return !hasStarted || selectedTests.has(testNameString);
-        }).map((testName) => {
-          // Extract test name string from potential object
-          const testNameString = typeof testName === 'string' ? testName : 
-                                 (testName?.name || testName?.testName || String(testName || 'unknown-test'));
-          
-          const result = testResults[testNameString] || { status: 'queued', message: 'Waiting to start...' };
-          const outputs = testOutputs[testNameString] || [];
-          const colorClass = getTestColorClass(testName);
-          const icon = getTestIcon(testName);
-          const statusIcon = getStatusIcon(result.status);
-          const statusClass = getStatusClass(result.status);
+        {testCollection.getAll()
+          .filter(testDef => !hasStarted || selectedTests.has(testDef.id))
+          .map((testDef) => {
+            const testNameString = testDef.getExecutionName(); // For backend execution
+            const displayName = testDef.getDisplayName(); // For user-friendly display
+            
+            const result = testResults[testNameString] || { status: 'queued', message: 'Waiting to start...' };
+            const outputs = testOutputs[testNameString] || [];
+            const colorClass = getTestColorClass(testDef.name);
+            const icon = getTestIcon(testDef.name);
+            const statusIcon = getStatusIcon(result.status);
+            const statusClass = getStatusClass(result.status);
 
-          return (
-            <div
-              key={testNameString}
-              className={`test-card border-2 card-shadow transition-all duration-300 ${colorClass} ${statusClass} ${!selectedTests.has(testNameString) && !hasStarted ? 'opacity-60' : ''}`}
-              style={{ borderRadius: '5px', padding: '15px', margin: '10px', position: 'relative' }}
-            >
-              {/* Individual Test Selection Checkbox - Only when tests haven't started */}
-              {!hasStarted && !isRunning && (
-                <button
-                  onClick={() => toggleTestSelection(testNameString)}
-                  className="hover-lift transition-all duration-200"
-                  style={{
-                    position: 'absolute',
-                    top: '10px',
-                    right: '10px',
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '4px',
-                    border: '2px solid #000000',
-                    backgroundColor: selectedTests.has(testNameString) ? '#10b981' : '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 1000
-                  }}
-                  title={selectedTests.has(testNameString) ? "Click to deselect this test" : "Click to select this test"}
-                >
-                  {selectedTests.has(testNameString) ? (
-                    <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
-                  ) : null}
-                </button>
-              )}
+            return (
+              <div
+                key={testDef.id}
+                className={`test-card border-2 card-shadow transition-all duration-300 ${colorClass} ${statusClass} ${!selectedTests.has(testDef.id) && !hasStarted ? 'opacity-60' : ''}`}
+                style={{ borderRadius: '5px', padding: '15px', margin: '10px', position: 'relative' }}
+              >
+                {/* Individual Test Selection Checkbox - ROBUST: Use test ID */}
+                {!hasStarted && !isRunning && (
+                  <button
+                    onClick={() => toggleTestSelection(testDef.id)}
+                    className="hover-lift transition-all duration-200"
+                    style={{
+                      position: 'absolute',
+                      top: '10px',
+                      right: '10px',
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      border: '2px solid #000000',
+                      backgroundColor: selectedTests.has(testDef.id) ? '#10b981' : '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 1000
+                    }}
+                    title={selectedTests.has(testDef.id) ? "Click to deselect this test" : "Click to select this test"}
+                  >
+                    {selectedTests.has(testDef.id) ? (
+                      <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: 'bold' }}>✓</span>
+                    ) : null}
+                  </button>
+                )}
 
-              {/* Test Header */}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex-1 pr-8">
-                  <h3 className="font-poppins font-semibold text-gray-900 flex items-center">
-                    <span>{icon}</span>
-                    <span style={{ marginLeft: '5px' }}>{testNameString}</span>
-                    {currentlyRunning.has(testNameString) && (
+                {/* Test Header - ENHANCED: Show clear differentiation */}
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex-1 pr-8">
+                    <h3 className="font-poppins font-semibold text-gray-900 flex items-center">
+                      <span>{icon}</span>
+                      <span style={{ marginLeft: '5px' }}>{displayName}</span>
+                      {currentlyRunning.has(testNameString) && (
+                        <span style={{
+                          marginLeft: '12px',
+                          backgroundColor: getStatusColor(testNameString),
+                          color: '#ffffff',
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          fontSize: '0.75rem',
+                          fontWeight: '500',
+                          display: 'inline-block',
+                          transition: 'background-color 0.3s ease-in-out'
+                        }}>
+                          {getRunningStatusMessage(testNameString)}
+                        </span>
+                      )}
+                    </h3>
+                    <p className="font-inter text-sm text-gray-600 mt-1">
+                      {testDef.category}
+                    </p>
+                    {/* Show reason for recommended tests */}
+                    {testDef.reason && (
+                      <p className="font-inter text-xs text-gray-500 mt-1 italic">
+                        {testDef.reason}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* CLI Command Section - Terminal Style */}
+                {showCliCommands && (
+                  <div className="rounded text-white cli-command mb-3" style={{
+                    fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
+                    fontWeight: 'normal',
+                    backgroundColor: 'rgb(55, 65, 81)',
+                    fontSize: '0.875rem',
+                    letterSpacing: '0.025em',
+                    lineHeight: '1.5',
+                    color: 'rgb(255, 255, 255)',
+                    padding: '5px 30px 5px 5px',
+                    margin: '5px',
+                    display: 'block',
+                    position: 'relative'
+                  }}>
+                    ./k8s_diagnostic test list: {testNameString} --verbose
+                    <span 
+                      title="Copy command to clipboard"
+                      onClick={() => copyCommandToClipboard(testNameString)}
+                      style={{
+                        position: 'absolute',
+                        right: '5px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        cursor: 'pointer',
+                        fontSize: '0.875rem',
+                        opacity: '0.8',
+                        transition: 'opacity 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.target.style.opacity = '1'}
+                      onMouseLeave={(e) => e.target.style.opacity = '0.8'}
+                    >
+                      📋
+                    </span>
+                  </div>
+                )}
+
+                {/* Rich Status Area with User Messages */}
+                <div className="bg-white bg-opacity-70 rounded-lg p-3 min-h-20">
+                  {hasStarted && (result.status === 'queued' || result.status === 'running' || result.status === 'loading') && (
+                    <div style={{ minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '8px' }}>
+                      <div style={{ 
+                        height: '14px', 
+                        borderRadius: '7px',
+                        width: '85%',
+                        backgroundColor: '#ffffff',
+                        animation: 'pulse 2s ease-in-out infinite'
+                      }}></div>
+                      <div style={{ 
+                        height: '14px', 
+                        borderRadius: '7px',
+                        width: '70%',
+                        backgroundColor: '#ffffff',
+                        animation: 'pulse 2s ease-in-out infinite 0.5s'
+                      }}></div>
+                      <div style={{ 
+                        height: '14px', 
+                        borderRadius: '7px',
+                        width: '60%',
+                        backgroundColor: '#ffffff',
+                        animation: 'pulse 2s ease-in-out infinite 1s'
+                      }}></div>
+                      <style jsx>{`
+                        @keyframes pulse {
+                          0%, 100% { opacity: 0.4; }
+                          50% { opacity: 1; }
+                        }
+                      `}</style>
+                    </div>
+                  )}
+                  
+                  {result.status === 'success' && (() => {
+                    const richDisplay = generateRichSuccessDisplay(testDef.name, result);
+                    return (
+                      <div className="text-green-600">
+                        <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4', marginTop: '10px' }}>
+                          {richDisplay.mainStatus}
+                        </div>
+                        <div className="space-y-1">
+                          {richDisplay.details.map((detail, index) => (
+                            <div key={index} className="text-sm font-inter text-green-700" style={{ lineHeight: '1.5' }}>
+                              {detail}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {result.status === 'failed' && (() => {
+                    const richDisplay = generateRichFailureDisplay(testDef.name, result);
+                    return (
+                      <div className="text-red-600">
+                        <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4' }}>
+                          {richDisplay.mainStatus}
+                        </div>
+                        <div className="space-y-1">
+                          {richDisplay.details.map((detail, index) => (
+                            <div key={index} className="text-sm font-inter text-red-700" style={{ lineHeight: '1.5' }}>
+                              {detail}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {result.status === 'terminated' && (() => {
+                    const richDisplay = generateRichTerminatedDisplay(testDef.name, result);
+                    return (
+                      <div className="text-amber-600">
+                        <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4' }}>
+                          {richDisplay.mainStatus}
+                        </div>
+                        <div className="space-y-1">
+                          {richDisplay.details.map((detail, index) => (
+                            <div key={index} className="text-sm font-inter text-amber-700" style={{ lineHeight: '1.5' }}>
+                              {detail}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  
+                  {/* Fallback display for other statuses */}
+                  {!hasStarted && (
+                    <div className="font-inter" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div></div>
                       <span style={{
-                        marginLeft: '12px',
-                        backgroundColor: getStatusColor(testNameString),
+                        backgroundColor: '#10b981',
                         color: '#ffffff',
                         padding: '4px 8px',
                         borderRadius: '12px',
                         fontSize: '0.75rem',
                         fontWeight: '500',
-                        display: 'inline-block',
-                        transition: 'background-color 0.3s ease-in-out'
+                        display: 'inline-block'
                       }}>
-                        {getRunningStatusMessage(testNameString)}
+                        Ready to run
                       </span>
-                    )}
-                  </h3>
-                  <p className="font-inter text-sm text-gray-600 mt-1">
-                    {getTestCategory(testName)}
-                  </p>
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {/* CLI Command Section - Terminal Style */}
-              {showCliCommands && (
-                <div className="rounded text-white cli-command mb-3" style={{
-                  fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
-                  fontWeight: 'normal',
-                  backgroundColor: 'rgb(55, 65, 81)',
-                  fontSize: '0.875rem',
-                  letterSpacing: '0.025em',
-                  lineHeight: '1.5',
-                  color: 'rgb(255, 255, 255)',
-                  padding: '5px 30px 5px 5px',
-                  margin: '5px',
-                  display: 'block',
-                  position: 'relative'
-                }}>
-                  ./k8s_diagnostic test list: {testNameString} --verbose
-                  <span 
-                    title="Copy command to clipboard"
-                    onClick={() => copyCommandToClipboard(testNameString)}
-                    style={{
-                      position: 'absolute',
-                      right: '5px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      cursor: 'pointer',
-                      fontSize: '0.875rem',
-                      opacity: '0.8',
-                      transition: 'opacity 0.2s'
-                    }}
-                    onMouseEnter={(e) => e.target.style.opacity = '1'}
-                    onMouseLeave={(e) => e.target.style.opacity = '0.8'}
-                  >
-                    📋
-                  </span>
-                </div>
-              )}
-
-              {/* Rich Status Area with User Messages */}
-              <div className="bg-white bg-opacity-70 rounded-lg p-3 min-h-20">
-                {hasStarted && (result.status === 'queued' || result.status === 'running' || result.status === 'loading') && (
-                  <div style={{ minHeight: '80px', display: 'flex', flexDirection: 'column', gap: '16px', paddingTop: '8px' }}>
-                    <div style={{ 
-                      height: '14px', 
-                      borderRadius: '7px',
-                      width: '85%',
-                      backgroundColor: '#ffffff',
-                      animation: 'pulse 2s ease-in-out infinite'
-                    }}></div>
-                    <div style={{ 
-                      height: '14px', 
-                      borderRadius: '7px',
-                      width: '70%',
-                      backgroundColor: '#ffffff',
-                      animation: 'pulse 2s ease-in-out infinite 0.5s'
-                    }}></div>
-                    <div style={{ 
-                      height: '14px', 
-                      borderRadius: '7px',
-                      width: '60%',
-                      backgroundColor: '#ffffff',
-                      animation: 'pulse 2s ease-in-out infinite 1s'
-                    }}></div>
-                    <style jsx>{`
-                      @keyframes pulse {
-                        0%, 100% { opacity: 0.4; }
-                        50% { opacity: 1; }
-                      }
-                    `}</style>
-                  </div>
-                )}
-                
-                {result.status === 'success' && (() => {
-                  const richDisplay = generateRichSuccessDisplay(testName, result);
-                  return (
-                    <div className="text-green-600">
-                      <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4', marginTop: '10px' }}>
-                        {richDisplay.mainStatus}
-                      </div>
-                      <div className="space-y-1">
-                        {richDisplay.details.map((detail, index) => (
-                          <div key={index} className="text-sm font-inter text-green-700" style={{ lineHeight: '1.5' }}>
-                            {detail}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-                
-                {result.status === 'failed' && (() => {
-                  const richDisplay = generateRichFailureDisplay(testName, result);
-                  return (
-                    <div className="text-red-600">
-                      <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4' }}>
-                        {richDisplay.mainStatus}
-                      </div>
-                      <div className="space-y-1">
-                        {richDisplay.details.map((detail, index) => (
-                          <div key={index} className="text-sm font-inter text-red-700" style={{ lineHeight: '1.5' }}>
-                            {detail}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-                
-                {result.status === 'terminated' && (() => {
-                  const richDisplay = generateRichTerminatedDisplay(testName, result);
-                  return (
-                    <div className="text-amber-600">
-                      <div className="font-semibold font-inter text-base mb-3" style={{ lineHeight: '1.4' }}>
-                        {richDisplay.mainStatus}
-                      </div>
-                      <div className="space-y-1">
-                        {richDisplay.details.map((detail, index) => (
-                          <div key={index} className="text-sm font-inter text-amber-700" style={{ lineHeight: '1.5' }}>
-                            {detail}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-                
-                {/* Fallback display for other statuses */}
-                {!hasStarted && (
-                  <div className="font-inter" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div></div>
-                    <span style={{
-                      backgroundColor: '#10b981',
-                      color: '#ffffff',
-                      padding: '4px 8px',
-                      borderRadius: '12px',
-                      fontSize: '0.75rem',
-                      fontWeight: '500',
-                      display: 'inline-block'
-                    }}>
-                      Ready to run
-                    </span>
+                {/* Progress for running tests */}
+                {result.status === 'running' && (
+                  <div className="mt-3 bg-gray-200 rounded-full h-2">
+                    <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
                   </div>
                 )}
               </div>
-
-              {/* Progress for running tests */}
-              {result.status === 'running' && (
-                <div className="mt-3 bg-gray-200 rounded-full h-2">
-                  <div className="bg-blue-500 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            );
+          })}
       </div>
 
       {/* Results Summary - Show immediately when any test completes */}

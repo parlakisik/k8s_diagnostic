@@ -14,8 +14,6 @@ export default function handler(req, res) {
 
   const { cliCommand, testId } = req.body;
   
-  console.log(`[API] Test request received - TestID: ${testId}, Command: ${cliCommand}`);
-  console.log(`[API] Current running test: ${runningTest ? runningTest.testId : 'None'}`);
   
   if (!cliCommand) {
     return res.status(400).json({ error: 'CLI command is required' });
@@ -23,7 +21,6 @@ export default function handler(req, res) {
 
   // Check if a test is already running
   if (runningTest && runningTest.testId !== testId) {
-    console.log(`[API] BLOCKING: Test ${testId} blocked because ${runningTest.testId} is already running`);
     return res.status(409).json({ 
       error: 'Another test is currently running',
       runningTestId: runningTest.testId,
@@ -33,7 +30,6 @@ export default function handler(req, res) {
 
   // If the same test is already running, reject duplicate
   if (runningTest && runningTest.testId === testId) {
-    console.log(`[API] DUPLICATE: Test ${testId} is already running, rejecting duplicate request`);
     return res.status(409).json({ 
       error: 'This test is already running',
       testId: testId,
@@ -58,7 +54,6 @@ export default function handler(req, res) {
     command: cliCommand
   };
   
-  console.log(`[API] STARTING: Test ${testId} is now running`);
 
   // Set up Server-Sent Events (SSE) for real-time streaming
   res.writeHead(200, {
@@ -86,7 +81,6 @@ export default function handler(req, res) {
 
   const projectRoot = getProjectRoot();
   
-  console.log(`[API] SPAWNING: CLI process for test ${testId} - Command: ${command} ${args.join(' ')}`);
   
   // Check if running in Docker environment
   const isDockerEnvironment = process.env.SHARED_VOLUME_PATH !== undefined;
@@ -94,7 +88,6 @@ export default function handler(req, res) {
   let childProcess;
   if (isDockerEnvironment) {
     // Spawn CLI container instead of local binary
-    console.log(`[API] DOCKER MODE: Running CLI in container`);
     childProcess = spawn('docker', [
       'compose',
       '--profile', 'cli', 
@@ -110,7 +103,6 @@ export default function handler(req, res) {
     });
   } else {
     // Local development - run binary directly
-    console.log(`[API] LOCAL MODE: Running local binary`);
     childProcess = spawn(command, args, {
       cwd: projectRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -121,7 +113,6 @@ export default function handler(req, res) {
   // Function to clear running test state
   const clearRunningTest = () => {
     if (runningTest && runningTest.testId === testId) {
-      console.log(`[API] CLEARING: Test ${testId} is no longer running`);
       runningTest = null;
     }
   };
@@ -167,7 +158,6 @@ export default function handler(req, res) {
 
   // Transform HTTP API event for frontend
   const transformHttpEvent = (event) => {
-    console.log('[run-test.js] Raw HTTP event received:', event);
     
     // Handle user-friendly messages from HTTP API
     if (event.type === 'user_step' && event.userMessage) {
@@ -183,7 +173,6 @@ export default function handler(req, res) {
         technicalDetails: event.technicalDetails,
         showTechnicalDetails: false
       };
-      console.log('[run-test.js] Transformed user-friendly event:', transformed);
       return transformed;
     }
     
@@ -197,7 +186,6 @@ export default function handler(req, res) {
       data: event.data || {},
       testId: event.testId
     };
-    console.log('[run-test.js] Transformed regular event:', transformed);
     return transformed;
   };
 

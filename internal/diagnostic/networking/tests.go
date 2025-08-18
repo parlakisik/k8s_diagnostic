@@ -183,11 +183,6 @@ func TestPodToPodConnectivityWithConfig(logger *core.MultiChannelLogger, t *core
 	}
 
 	// Log the rich user message so the HTTP API can pick it up
-	fmt.Printf("[DEBUG NETWORKING] 🎨 About to log rich user message for cross-node test\n")
-	fmt.Printf("[DEBUG NETWORKING] 📋 UserMessage: %+v\n", userMessage)
-	fmt.Printf("[DEBUG NETWORKING] 🌐 HTTP collector configured for localhost:3000\n")
-	fmt.Printf("[DEBUG NETWORKING] 🆔 TestId: %s\n", testId)
-
 	collector.LogUserStepHTTP(
 		userMessage.Phase,
 		userMessage.Status,
@@ -201,8 +196,6 @@ func TestPodToPodConnectivityWithConfig(logger *core.MultiChannelLogger, t *core
 			"cniProvider": infrastructure.CNIProvider,
 		},
 	)
-
-	fmt.Printf("[DEBUG NETWORKING] ✅ LogUserStepHTTP called successfully\n")
 
 	// Basic success message for backward compatibility
 	successMessage := "Pod-to-pod connectivity test passed"

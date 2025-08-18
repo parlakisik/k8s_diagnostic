@@ -2,6 +2,37 @@ import { spawn } from 'child_process';
 import path from 'path';
 import featureService from '../../services/FeatureService.js';
 
+// Helper function to extract JSON from mixed output (debug messages + JSON)
+function extractJSONFromOutput(output) {
+  // Find the first opening brace
+  const startIndex = output.indexOf('{');
+  if (startIndex === -1) {
+    throw new Error('No JSON object found in output');
+  }
+
+  // Find the matching closing brace
+  let braceCount = 0;
+  let endIndex = -1;
+  
+  for (let i = startIndex; i < output.length; i++) {
+    if (output[i] === '{') {
+      braceCount++;
+    } else if (output[i] === '}') {
+      braceCount--;
+      if (braceCount === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (endIndex === -1) {
+    throw new Error('No complete JSON object found in output');
+  }
+
+  return output.substring(startIndex, endIndex + 1);
+}
+
 export default function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -116,21 +147,28 @@ export default function handler(req, res) {
   childProcess.on('close', (code) => {
     console.log(`[CILIUM CONFIG API] Process finished with code: ${code}`);
 
-    if (code === 0) {
-      let responseData = {};
+    let responseData = {};
+    let success = false;
+    let message = '';
 
-      if (operation === 'config') {
+    if (operation === 'config') {
+      // Config operation: only succeed if exit code is 0
+      if (code === 0) {
         try {
-          // Parse the accumulated JSON config data
-          const parsedConfig = JSON.parse(configData.trim());
+          // Extract clean JSON from mixed output (debug messages + JSON)
+          const jsonPart = extractJSONFromOutput(configData);
+          const parsedConfig = JSON.parse(jsonPart);
           responseData = {
             config: parsedConfig,
             insights: generateConfigInsights(parsedConfig)
           };
           
           console.log(`[CILIUM CONFIG API] Successfully parsed config with ${Object.keys(parsedConfig).length} keys`);
+          success = true;
+          message = '✅ Configuration retrieved successfully';
         } catch (parseError) {
           console.error(`[CILIUM CONFIG API] JSON parse error:`, parseError);
+          console.error(`[CILIUM CONFIG API] Raw output:`, configData.substring(0, 200) + '...');
           res.write(`data: ${JSON.stringify({
             type: 'cilium_error',
             error: `Failed to parse configuration JSON: ${parseError.message}`,
@@ -140,32 +178,51 @@ export default function handler(req, res) {
           return;
         }
       } else {
-        // For validation operation
-        responseData = {
-          validationResults: validationResults,
-          summary: parseValidationResults(validationResults)
-        };
+        success = false;
+        message = '❌ Failed to retrieve Cilium configuration';
       }
-
-      res.write(`data: ${JSON.stringify({
-        type: 'cilium_complete',
-        success: true,
-        message: operation === 'config' ? '✅ Configuration retrieved successfully' : '✅ Validation completed',
-        data: responseData,
-        exitCode: code,
-        timestamp: new Date().toISOString()
-      })}\n\n`);
     } else {
-      res.write(`data: ${JSON.stringify({
-        type: 'cilium_complete',
-        success: false,
-        message: operation === 'config' 
-          ? '❌ Failed to retrieve Cilium configuration' 
-          : '❌ Feature validation completed with errors',
-        exitCode: code,
-        timestamp: new Date().toISOString()
-      })}\n\n`);
+      // Validation operation: process results regardless of exit code
+      // Exit code 1 just means some features failed validation (which is normal)
+      console.log(`[CILIUM CONFIG API] Processing validation results: ${validationResults.length} lines`);
+      
+      // Filter out debug messages and keep only actual validation lines
+      const cleanValidationResults = validationResults
+        .filter(line => line.trim().length > 0)
+        .filter(line => !line.startsWith('DEBUG:'))
+        .filter(line => !line.includes('NewMultiChannelLogger'))
+        .filter(line => !line.includes('Creating shared timestamp'))
+        .filter(line => !line.includes('Verbose logger'))
+        .filter(line => !line.includes('UI integration mode'))
+        .filter(line => !line.includes('HTTP logger'))
+        .filter(line => !line.includes('Progress tracker'))
+        .filter(line => !line.startsWith('Validating Cilium feature prerequisites'))
+        .filter(line => !line.includes('feature(s) failed validation'));
+        
+      console.log(`[CILIUM CONFIG API] Clean validation results: ${cleanValidationResults.length} lines`);
+
+      if (cleanValidationResults.length > 0) {
+        const summary = parseValidationResults(cleanValidationResults);
+        responseData = {
+          validationResults: cleanValidationResults,
+          summary: summary
+        };
+        success = true;
+        message = '✅ Feature validation completed';
+      } else {
+        success = false;
+        message = '❌ No validation results found';
+      }
     }
+
+    res.write(`data: ${JSON.stringify({
+      type: 'cilium_complete',
+      success: success,
+      message: message,
+      data: responseData,
+      exitCode: code,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
 
     res.end();
     console.log(`[CILIUM CONFIG API] COMPLETED: ${operation} operation finished`);

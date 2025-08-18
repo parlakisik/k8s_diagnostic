@@ -11,7 +11,6 @@ let processLocks = new Map(); // Prevent concurrent process operations: testId -
 // Docker availability check - no binary building needed
 async function ensureDockerIsAvailable(projectRoot, res, testId) {
   try {
-    console.log(`[BATCH API] Checking Docker Compose availability...`);
     res.write(`data: ${JSON.stringify({
       type: 'build_start',
       message: '🐳 Preparing Docker containers...',
@@ -38,7 +37,6 @@ async function ensureDockerIsAvailable(projectRoot, res, testId) {
       
       dockerProcess.on('close', (code) => {
         if (code === 0) {
-          console.log(`[BATCH API] Docker Compose is available`);
           res.write(`data: ${JSON.stringify({
             type: 'build_complete',
             message: '✅ Docker containers ready, starting tests...',
@@ -72,7 +70,6 @@ async function ensureDockerIsAvailable(projectRoot, res, testId) {
 
 // Process fallback messages when found under individual test names
 function processFallbackMessages(fallbackData, testList, foundTestName) {
-  console.log(`[BATCH API] 🔄 Processing fallback messages for ${foundTestName}`);
   
   const userMessages = {};
   
@@ -85,10 +82,6 @@ function processFallbackMessages(fallbackData, testList, foundTestName) {
   if (fallbackData.events && Array.isArray(fallbackData.events)) {
     fallbackData.events.forEach(event => {
       if (event.type === 'user_step' && event.userMessage) {
-        console.log(`[BATCH API] 🎯 Processing fallback user_step:`, {
-          eventTestName: event.testName,
-          userMessageTitle: event.userMessage.title
-        });
         
         // For fallback, we already know this message belongs to foundTestName
         userMessages[foundTestName] = {
@@ -99,10 +92,6 @@ function processFallbackMessages(fallbackData, testList, foundTestName) {
           status: event.userMessage.status
         };
         
-        console.log(`[BATCH API] 🎨 Fallback message stored for ${foundTestName}:`, {
-          title: event.userMessage.title,
-          description: event.userMessage.description
-        });
       }
     });
   }
@@ -113,7 +102,6 @@ function processFallbackMessages(fallbackData, testList, foundTestName) {
 // Fetch user-friendly messages from HTTP API log events
 async function fetchUserMessagesFromHTTP(testId, testList) {
   try {
-    console.log(`[BATCH API] Fetching user messages for testId: ${testId}`);
     
     // Query the log-events API for user messages
     const response = await fetch(`http://localhost:${process.env.PORT || 3000}/api/log-events?testId=${testId}`, {
@@ -124,10 +112,8 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
     });
 
     if (!response.ok) {
-      console.log(`[BATCH API] HTTP API not available or no messages found for testId: ${testId}`);
       
       // Fallback: Try querying with individual test names
-      console.log(`[BATCH API] 🔄 Trying fallback approach with individual test names...`);
       
       for (const testName of testList) {
         try {
@@ -138,7 +124,6 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
           
           if (fallbackResponse.ok) {
             const fallbackData = await fallbackResponse.json();
-            console.log(`[BATCH API] ✅ Found messages for ${testName}: ${fallbackData.events?.length || 0} events`);
             
             if (fallbackData.events && fallbackData.events.length > 0) {
               // Process this fallback data and return it
@@ -146,7 +131,6 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
             }
           }
         } catch (error) {
-          console.log(`[BATCH API] Fallback failed for ${testName}:`, error.message);
         }
       }
       
@@ -154,7 +138,6 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
     }
 
     const data = await response.json();
-    console.log(`[BATCH API] Retrieved ${data.events?.length || 0} events from HTTP API`);
     
     const userMessages = {};
     
@@ -165,21 +148,10 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
 
     // Process events to find user-friendly messages
     if (data.events && Array.isArray(data.events)) {
-      console.log(`[BATCH API] 🔍 Searching for user messages in ${data.events.length} events...`);
       
       data.events.forEach((event, index) => {
-        console.log(`[BATCH API] 📋 Event ${index}:`, { 
-          type: event.type, 
-          testName: event.testName, 
-          testId: event.testId,
-          hasUserMessage: !!event.userMessage 
-        });
         
         if (event.type === 'user_step' && event.userMessage) {
-          console.log(`[BATCH API] 🎯 Found user_step event with userMessage:`, {
-            eventTestName: event.testName,
-            userMessageTitle: event.userMessage.title
-          });
           
           // Enhanced matching logic - try multiple approaches
           let matchingTestName = null;
@@ -187,7 +159,6 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
           // Approach 1: Direct testName match
           if (event.testName && testList.includes(event.testName)) {
             matchingTestName = event.testName;
-            console.log(`[BATCH API] ✅ Match found via direct testName: ${matchingTestName}`);
           }
           
           // Approach 2: Look for testName in testList that matches this event's testName
@@ -198,7 +169,6 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
               event.testName.includes(testName)
             );
             if (matchingTestName) {
-              console.log(`[BATCH API] ✅ Match found via fuzzy testName: ${matchingTestName} (from ${event.testName})`);
             }
           }
           
@@ -209,14 +179,12 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
               messageContent.includes(testName.toLowerCase())
             );
             if (matchingTestName) {
-              console.log(`[BATCH API] ✅ Match found via userMessage content: ${matchingTestName}`);
             }
           }
           
           // Approach 4: If only one test in testList, assume it's for that test
           if (!matchingTestName && testList.length === 1) {
             matchingTestName = testList[0];
-            console.log(`[BATCH API] ✅ Match found via single test assumption: ${matchingTestName}`);
           }
           
           if (matchingTestName) {
@@ -227,23 +195,12 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
               hints: event.userMessage.hints || [],
               status: event.userMessage.status
             };
-            console.log(`[BATCH API] 🎨 Stored user message for ${matchingTestName}:`, {
-              title: event.userMessage.title,
-              description: event.userMessage.description
-            });
           } else {
-            console.log(`[BATCH API] ❌ No match found for user_step event:`, {
-              eventTestName: event.testName,
-              availableTests: testList,
-              userMessageTitle: event.userMessage.title
-            });
           }
         }
       });
     }
     
-    // Final debug log
-    console.log(`[BATCH API] 📊 Final user messages mapping:`, userMessages);
     
     return userMessages;
     
@@ -657,39 +614,86 @@ export default async function handler(req, res) {
   console.log(`[BATCH API] Project root: ${projectRoot}`);
   console.log(`[BATCH API] Current working directory: ${process.cwd()}`);
   
-  // Ensure Docker Compose is available
-  const dockerResult = await ensureDockerIsAvailable(projectRoot, res, testId);
-  if (!dockerResult.success) {
-    console.error(`[BATCH API] ERROR: Docker check failed:`, dockerResult.error);
-    res.write(`data: ${JSON.stringify({
-      type: 'batch_error',
-      error: `❌ Docker check failed: ${dockerResult.error}`,
-      timestamp: new Date().toISOString()
-    })}\n\n`);
-    runningTests.delete(testId);
-    res.end();
-    return;
-  }
+  // Environment detection
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  const useDocker = process.env.USE_DOCKER === 'true' || !isDevelopment;
   
-  console.log(`[BATCH API] Using Docker Compose to spawn CLI container`);
+  console.log(`[BATCH API] Environment: ${isDevelopment ? 'development' : 'production'}`);
+  console.log(`[BATCH API] Use Docker: ${useDocker}`);
   
-  // Spawn the CLI process using Docker Compose
-  const dockerArgs = [
-    'compose', 'run', '--rm', 
-    'k8s-diagnostic-cli-standalone',  // Use standalone service with host networking
-    'test', 'list:', testListString, '--verbose'
-  ];
-  console.log(`[BATCH API] Spawning Docker process with args:`, dockerArgs);
+  let childProcess;
   
-  const childProcess = spawn('docker', dockerArgs, {
-    cwd: projectRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true,  // 🛡️ CRITICAL: Create new process group to manage child processes
-    env: { 
-      ...process.env,
-      BATCH_TEST_ID: testId  // Pass the batch test ID to the Go process
+  if (useDocker) {
+    // Production mode: Use Docker Compose
+    console.log(`[BATCH API] Using Docker Compose to spawn CLI container`);
+    
+    // Ensure Docker Compose is available
+    const dockerResult = await ensureDockerIsAvailable(projectRoot, res, testId);
+    if (!dockerResult.success) {
+      console.error(`[BATCH API] ERROR: Docker check failed:`, dockerResult.error);
+      res.write(`data: ${JSON.stringify({
+        type: 'batch_error',
+        error: `❌ Docker check failed: ${dockerResult.error}`,
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      runningTests.delete(testId);
+      res.end();
+      return;
     }
-  });
+    
+    // Spawn the CLI process using Docker Compose
+    const dockerArgs = [
+      'compose', 'run', '--rm', 
+      'k8s-diagnostic-cli-standalone',  // Use standalone service with host networking
+      'test', 'list:', testListString, '--verbose'
+    ];
+    console.log(`[BATCH API] Spawning Docker process with args:`, dockerArgs);
+    
+    childProcess = spawn('docker', dockerArgs, {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,  // 🛡️ CRITICAL: Create new process group to manage child processes
+      env: { 
+        ...process.env,
+        BATCH_TEST_ID: testId  // Pass the batch test ID to the Go process
+      }
+    });
+  } else {
+    // Development mode: Use local Go binary
+    console.log(`[BATCH API] Using local Go binary for development`);
+    
+    const localBinaryPath = path.join(projectRoot, 'k8s_diagnostic');
+    
+    // Check if local binary exists
+    try {
+      await fs.promises.access(localBinaryPath, fs.constants.F_OK);
+      console.log(`[BATCH API] Local binary found: ${localBinaryPath}`);
+    } catch (error) {
+      console.error(`[BATCH API] ERROR: Local binary not found: ${localBinaryPath}`);
+      res.write(`data: ${JSON.stringify({
+        type: 'batch_error',
+        error: `❌ Local Go binary not found at ${localBinaryPath}. Run 'go build -o k8s_diagnostic .' in the project root first.`,
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      runningTests.delete(testId);
+      res.end();
+      return;
+    }
+    
+    // Spawn the local CLI process
+    const localArgs = ['test', 'list:', testListString, '--verbose'];
+    console.log(`[BATCH API] Spawning local process with args:`, localArgs);
+    
+    childProcess = spawn(localBinaryPath, localArgs, {
+      cwd: projectRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,  // 🛡️ CRITICAL: Create new process group to manage child processes
+      env: { 
+        ...process.env,
+        BATCH_TEST_ID: testId  // Pass the batch test ID to the Go process
+      }
+    });
+  }
   
   // 🛡️ ENHANCED: Store process group ID for proper termination
   const processGroupId = childProcess.pid;
@@ -742,7 +746,6 @@ export default async function handler(req, res) {
       if (trimmedLine.startsWith('SSE_EVENT:')) {
         try {
           const eventData = JSON.parse(trimmedLine.substring(10));
-          console.log(`[BATCH API] 🎯 Received SSE event from Go CLI:`, eventData);
           
           // Forward the event immediately to frontend
           res.write(`data: ${JSON.stringify(eventData)}\n\n`);
@@ -752,14 +755,12 @@ export default async function handler(req, res) {
           if (eventData.type === 'test_start' && eventData.testName) {
             testStarted[eventData.testName] = true;
             updateTestProcessState(testId, eventData.testName, 'running', 'Test in progress...');
-            console.log(`[BATCH API] ✅ Test started: ${eventData.testName} (from SSE event)`);
           }
           
           if (eventData.type === 'test_complete' && eventData.testName) {
             const status = eventData.success ? 'completed' : 'failed';
             const message = eventData.success ? 'Test completed successfully' : 'Test failed';
             updateTestProcessState(testId, eventData.testName, status, message);
-            console.log(`[BATCH API] ✅ Test completed: ${eventData.testName} -> ${status} (from SSE event)`);
           }
           
         } catch (parseError) {
@@ -929,9 +930,7 @@ export default async function handler(req, res) {
       const result = extractedResults[testName];
       const userMessage = userMessages[testName] || null;
       
-      console.log(`[BATCH API] ✅ Sending result for ${testName}:`, result);
       if (userMessage) {
-        console.log(`[BATCH API] 🎨 Including user message for ${testName}:`, userMessage.title);
       }
       
       res.write(`data: ${JSON.stringify({

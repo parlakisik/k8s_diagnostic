@@ -293,6 +293,32 @@ class FeatureService {
   }
 
   /**
+   * Get tests associated with a specific feature
+   */
+  getTestsForFeature(featureName) {
+    const feature = this.features[featureName] || this.validationFeatures[featureName];
+    if (feature && feature.tests) {
+      return feature.tests;
+    }
+    
+    // Fallback - generate basic test recommendation for known enabled features
+    const basicTests = {
+      'gateway-api': [{
+        name: 'basic-http-get',
+        description: 'Validate HTTP connectivity and ingress routing',
+        rationale: 'test advanced ingress and traffic management capabilities'
+      }],
+      'kube-proxy-replacement-strict': [{
+        name: 'basic-connectivity',
+        description: 'Test service mesh and load balancing',
+        rationale: 'validate kube-proxy replacement functionality'
+      }]
+    };
+    
+    return basicTests[featureName] || [];
+  }
+
+  /**
    * Get validation feature metadata (used for CLI validation results)
    */
   getValidationFeatureMetadata(featureName) {
@@ -323,6 +349,7 @@ class FeatureService {
       enabledCount: 0,
       availableCount: 0,
       recommendations: [],
+      recommendedTests: [], // Add this for test recommendations
       systemStatus: 'healthy'
     };
 
@@ -337,7 +364,8 @@ class FeatureService {
         
         if (line.includes('OK')) {
           summary.enabledCount++;
-          summary.enabledFeatures.push({
+          
+          const enabledFeature = {
             name: featureName,
             status: 'enabled',
             displayName: metadata.displayName,
@@ -345,7 +373,29 @@ class FeatureService {
             priority: metadata.priority,
             description: metadata.description,
             message: `✅ ${metadata.displayName} is active and working properly`
-          });
+          };
+          
+          summary.enabledFeatures.push(enabledFeature);
+          
+          // Generate test recommendations for enabled features
+          const featureTests = this.getTestsForFeature(featureName);
+          if (featureTests && featureTests.length > 0) {
+            featureTests.forEach(test => {
+              // Avoid duplicate tests
+              if (!summary.recommendedTests.find(t => t.name === test.name)) {
+                summary.recommendedTests.push({
+                  name: test.name,
+                  testName: test.name,
+                  description: test.description,
+                  rationale: `${metadata.displayName} is enabled - ${test.rationale}`,
+                  feature: metadata.displayName,
+                  category: metadata.category,
+                  priority: metadata.priority
+                });
+              }
+            });
+          }
+          
         } else if (line.includes('FAIL')) {
           summary.availableCount++;
           
