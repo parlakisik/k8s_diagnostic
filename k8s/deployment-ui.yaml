@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-diagnostic-ui
+  namespace: k8s-diagnostic
+  labels:
+    app: k8s-diagnostic-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-diagnostic-ui
+  template:
+    metadata:
+      labels:
+        app: k8s-diagnostic-ui
+    spec:
+      serviceAccountName: k8s-diagnostic-cli-sa
+      containers:
+        - name: ui
+          image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-ui:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: SHARED_VOLUME_PATH
+              value: "/app/shared"
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: shared
+              mountPath: /app/shared/repository/test_results
+        - name: cli
+          image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-cli:${IMAGE_TAG}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SHARED_VOLUME_PATH
+              value: "/app/shared"
+            - name: HTTP_LOG_URL
+              value: "http://k8s-diagnostic-ui:3000"
+          volumeMounts:
+            - name: shared
+              mountPath: /app/shared/repository/test_results
+          command: ["/bin/sh", "-c"]
+          args: ["sleep infinity"]
+      volumes:
+        - name: shared
+          persistentVolumeClaim:
+            claimName: k8s-diagnostic-results-pvc
+
