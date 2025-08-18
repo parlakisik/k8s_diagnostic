@@ -13,6 +13,7 @@ export default function CiliumConfigModal({
   const [insights, setInsights] = useState(null);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('config'); // 'config', 'status'
+  const [downloadClicked, setDownloadClicked] = useState(false);
 
   const startConfigFetch = async () => {
     setIsRunning(true);
@@ -232,6 +233,64 @@ export default function CiliumConfigModal({
       if (onConfigComplete) {
         onConfigComplete(true, testNames);
       }
+    }
+  };
+
+  const downloadCiliumJSON = () => {
+    if (!configData) {
+      console.warn('[CiliumConfigModal] No config data available for download');
+      return;
+    }
+
+    // Set clicked state for visual feedback
+    setDownloadClicked(true);
+
+    try {
+      // Create a comprehensive export with both raw config and metadata
+      const exportData = {
+        metadata: {
+          exportedAt: new Date().toISOString(),
+          source: 'k8s-diagnostic-tool',
+          version: '1.0'
+        },
+        ciliumConfig: configData,
+        ...(insights && { insights: insights })
+      };
+
+      // Convert to pretty-printed JSON
+      const jsonString = JSON.stringify(exportData, null, 2);
+      
+      // Create blob with proper MIME type
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      
+      // Generate filename with timestamp
+      const now = new Date();
+      const timestamp = now.toISOString().split('T')[0] + '-' + 
+                       now.toTimeString().split(' ')[0].replace(/:/g, '-');
+      const filename = `cilium-config-${timestamp}.json`;
+      
+      // Create download link and trigger download
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      console.log(`[CiliumConfigModal] Successfully downloaded: ${filename}`);
+      
+      // Reset clicked state after a short delay
+      setTimeout(() => {
+        setDownloadClicked(false);
+      }, 1500);
+    } catch (error) {
+      console.error('[CiliumConfigModal] Download error:', error);
+      alert('Failed to download configuration. Please try again.');
+      setDownloadClicked(false);
     }
   };
 
@@ -508,6 +567,7 @@ export default function CiliumConfigModal({
             }}
             className="btn-outline font-comfortaa font-semibold transition-all hover-lift flex items-center"
             style={{ 
+              marginRight: '7px',
               padding: '8px 16px', 
               borderRadius: '5px',
               ...(activeTab === 'status' ? {
@@ -518,6 +578,27 @@ export default function CiliumConfigModal({
           >
             <span style={{ marginRight: '5px' }}>⚡</span>
             Feature Status Report
+          </button>
+          <button
+            onClick={downloadCiliumJSON}
+            disabled={!configData}
+            className="btn-outline font-comfortaa font-semibold transition-all hover-lift flex items-center"
+            style={{ 
+              padding: '8px 16px', 
+              borderRadius: '5px',
+              background: !configData ? '#f3f4f6' : 
+                         downloadClicked ? 'linear-gradient(135deg, rgb(251, 191, 36), rgb(245, 158, 11))' : '#ffffff',
+              color: !configData ? '#9ca3af' :
+                     downloadClicked ? 'black' : '#374151',
+              cursor: configData ? 'pointer' : 'not-allowed',
+              opacity: configData ? 1 : 0.6,
+              transform: downloadClicked ? 'scale(0.95)' : 'scale(1)',
+              transition: 'all 0.2s ease'
+            }}
+            title={configData ? 'Download Cilium configuration as JSON' : 'Configuration data not available'}
+          >
+            <span style={{ marginRight: '5px' }}>📥</span>
+            Download JSON
           </button>
         </div>
 
