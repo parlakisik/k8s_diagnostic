@@ -512,10 +512,25 @@ const terminateTestProcess = async (testId, testName = null) => {
   return result;
 };
 
-// 🛡️ NEW: Get synchronized state for debugging/monitoring
+// 🛡️ NEW: Get synchronized state for debugging/monitoring (safe for JSON serialization)
 const getProcessState = (testId) => {
+  const runningTest = runningTests.get(testId);
+  
+  // Create a safe copy without circular references (exclude res object)
+  const safeRunningTest = runningTest ? {
+    testList: runningTest.testList,
+    startTime: runningTest.startTime,
+    status: runningTest.status,
+    lastActivity: runningTest.lastActivity,
+    pid: runningTest.pid,
+    exitCode: runningTest.exitCode,
+    error: runningTest.error,
+    endTime: runningTest.endTime
+    // Note: res and childProcess objects excluded to prevent circular references
+  } : null;
+  
   return {
-    runningTest: runningTests.get(testId),
+    runningTest: safeRunningTest,
     testStates: testStateSync.get(testId),
     activeProcesses: Array.from(activeTestProcesses.entries()).filter(([_, state]) => state.testId === testId)
   };
@@ -574,7 +589,7 @@ export default async function handler(req, res) {
   runningTests.set(testId, {
     testList: testList,
     startTime: new Date(),
-    res: res,
+    // Note: res object removed to prevent circular reference issues when serializing
     status: 'initializing',
     childProcess: null, // Will be set when process spawns
     lastActivity: Date.now()

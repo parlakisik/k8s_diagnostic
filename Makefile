@@ -64,30 +64,30 @@ docker-build: docker-build-ui docker-build-cli ## Build all Docker containers
 
 docker-build-cli: build-linux ## Build CLI Docker container
 	@echo "🐳 Building CLI Docker container..."
-	docker build -f Dockerfile.cli-simple -t k8s_diagnostic-k8s-diagnostic-cli .
+	docker build -f docker/Dockerfile.cli-simple -t k8s_diagnostic-k8s-diagnostic-cli .
 	@echo "✅ CLI container built successfully"
 
 docker-build-ui: ## Build UI Docker container
 	@echo "🐳 Building UI Docker container..."
-	docker build -f Dockerfile.ui -t k8s_diagnostic-k8s-diagnostic-ui ./web
+	docker build -f docker/Dockerfile.ui -t k8s_diagnostic-k8s-diagnostic-ui ./web
 	@echo "✅ UI container built successfully"
 
 docker-compose-build: build-linux ## Build with docker-compose
 	@echo "🐳 Building containers with docker-compose..."
-	docker compose build
+	docker compose -f docker/docker-compose.yml build
 	@echo "✅ All containers built successfully"
 
 docker-up: docker-compose-build ## Build and start containers
 	@echo "🚀 Starting k8s-diagnostic services..."
-	docker compose up -d k8s-diagnostic-ui
+	docker compose -f docker/docker-compose.yml up -d k8s-diagnostic-ui
 	@echo "✅ Services started! UI available at http://localhost:3000"
 
 docker-down: ## Stop containers
 	@echo "🛑 Stopping k8s-diagnostic services..."
-	docker compose down
+	docker compose -f docker/docker-compose.yml down
 	@echo "✅ Services stopped"
 
 docker-clean: ## Clean Docker images and containers
 	@echo "🧹 Cleaning Docker artifacts..."
-	docker compose down --rmi all --volumes --remove-orphans
+	docker compose -f docker/docker-compose.yml down --rmi all --volumes --remove-orphans
 	@echo "✅ Docker cleanup complete"

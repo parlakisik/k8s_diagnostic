@@ -592,9 +592,6 @@ func (t *Tester) testNetworkPolicy(ctx context.Context, policyName, policyPath s
 		if details != nil {
 			*details = append(*details, fmt.Sprintf("✗ Failed to get node information: %v", err))
 		}
-		if verbose {
-			fmt.Printf("Warning: Failed to get node information, using defaults: %v\n", err)
-		}
 		// Continue with empty nodeInfo, ProcessPolicyTemplate will use defaults
 		nodeInfo = make(map[string]string)
 	}
@@ -617,9 +614,7 @@ func (t *Tester) testNetworkPolicy(ctx context.Context, policyName, policyPath s
 	defer func() {
 		if result.ProcessedFilePath != "" {
 			// Clean up the temporary file
-			if err := t.cleanupTemporaryFile(result.ProcessedFilePath); err != nil && verbose {
-				fmt.Printf("Warning: Failed to cleanup temporary file %s: %v\n", result.ProcessedFilePath, err)
-			}
+			t.cleanupTemporaryFile(result.ProcessedFilePath)
 		}
 	}()
 
@@ -895,29 +890,9 @@ func (t *Tester) testPodConnectivity(ctx context.Context, fromPod, toPod string,
 
 // getCiliumConfig retrieves the current Cilium configuration from the Kubernetes cluster
 func (t *Tester) getCiliumConfig(ctx context.Context) (map[string]string, error) {
-	if t.verbose {
-		fmt.Printf("Fetching Cilium configuration from ConfigMap in kube-system namespace...\n")
-	}
-
 	configMap, err := t.clientset.CoreV1().ConfigMaps("kube-system").Get(ctx, "cilium-config", metav1.GetOptions{})
 	if err != nil {
-		if t.verbose {
-			fmt.Printf("Failed to get Cilium config: %v\n", err)
-		}
 		return nil, err
-	}
-
-	if t.verbose {
-		fmt.Printf("Successfully retrieved Cilium configuration (%d settings)\n", len(configMap.Data))
-
-		// Print key settings that affect networking
-		importantKeys := []string{"routing-mode", "tunnel-protocol", "ipam", "enable-ipv4", "enable-ipv6", "enable-endpoint-routes"}
-		fmt.Printf("Important Cilium settings:\n")
-		for _, key := range importantKeys {
-			if value, exists := configMap.Data[key]; exists {
-				fmt.Printf("  - %s: %s\n", key, value)
-			}
-		}
 	}
 
 	return configMap.Data, nil
@@ -934,36 +909,14 @@ func (t *Tester) extractPingLatency(pingOutput string) float64 {
 				values := strings.TrimSpace(parts[1])
 				values = strings.Replace(values, " ms", "", -1)
 				latencyParts := strings.Split(values, "/")
-				if len(latencyParts) >= 4 {
-					// With verbose output, extract all latency metrics
-					if t.verbose {
-						minLatency, _ := strconv.ParseFloat(latencyParts[0], 64)
-						avgLatency, _ := strconv.ParseFloat(latencyParts[1], 64)
-						maxLatency, _ := strconv.ParseFloat(latencyParts[2], 64)
-						mdevLatency, _ := strconv.ParseFloat(latencyParts[3], 64)
-
-						fmt.Printf("Ping latency details: min=%.2fms, avg=%.2fms, max=%.2fms, mdev=%.2fms\n",
-							minLatency, avgLatency, maxLatency, mdevLatency)
-
-						return avgLatency
-					} else if len(latencyParts) >= 2 {
-						// Standard behavior - just return average
-						if avgLatency, err := strconv.ParseFloat(latencyParts[1], 64); err == nil {
-							return avgLatency
-						}
-					}
-				} else if len(latencyParts) >= 2 {
-					// Fallback if we don't have all 4 parts for some reason
+				if len(latencyParts) >= 2 {
+					// Return average latency
 					if avgLatency, err := strconv.ParseFloat(latencyParts[1], 64); err == nil {
 						return avgLatency
 					}
 				}
 			}
 		}
-	}
-
-	if t.verbose {
-		fmt.Printf("Could not extract ping latency from output\n")
 	}
 
 	return 0.0
@@ -981,17 +934,6 @@ func (t *Tester) extractPingLatency(pingOutput string) float64 {
 
 // execInPod executes a command in a pod and returns the output
 func (t *Tester) execInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, error) {
-	// Log command execution if verbose mode is enabled
-	if t.verbose {
-		cmdStr := strings.Join(command, " ")
-		fmt.Printf("Executing in pod %s/%s (container: %s): %s\n", namespace, podName, containerName, cmdStr)
-		startTime := time.Now()
-		defer func() {
-			duration := time.Since(startTime)
-			fmt.Printf("Command execution completed in %.3f seconds\n", duration.Seconds())
-		}()
-	}
-
 	req := t.clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
@@ -1007,9 +949,6 @@ func (t *Tester) execInPod(ctx context.Context, namespace, podName, containerNam
 
 	exec, err := remotecommand.NewSPDYExecutor(t.config, "POST", req.URL())
 	if err != nil {
-		if t.verbose {
-			fmt.Printf("Failed to create executor: %v\n", err)
-		}
 		return "", fmt.Errorf("failed to create executor: %v", err)
 	}
 
@@ -1021,13 +960,6 @@ func (t *Tester) execInPod(ctx context.Context, namespace, podName, containerNam
 
 	output := stdout.String()
 	stderrStr := stderr.String()
-
-	if t.verbose {
-		fmt.Printf("Command stdout (%d bytes):\n%s\n", len(output), output)
-		if stderrStr != "" {
-			fmt.Printf("Command stderr (%d bytes):\n%s\n", len(stderrStr), stderrStr)
-		}
-	}
 
 	if err != nil && stderr.Len() > 0 {
 		return output + "\nSTDERR: " + stderrStr, err
