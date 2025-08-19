@@ -106,12 +106,7 @@ func WithRetry(ctx context.Context, operation string, fn func() error, config Re
 		jitter := time.Duration(rand.Float64() * config.JitterFactor * float64(delay))
 		actualDelay := delay + jitter
 
-		fmt.Printf("%s API rate limit hit, retrying %s (attempt %d/%d) after %v...\n",
-			time.Now().Format("2006-01-02 15:04:05"),
-			operation,
-			attempt,
-			config.MaxAttempts,
-			actualDelay)
+		// Wait for the calculated delay with rate limit retry
 
 		// Wait for the calculated delay
 		select {
@@ -135,10 +130,6 @@ func WithRetry(ctx context.Context, operation string, fn func() error, config Re
 // GetNodeInfo retrieves basic node information
 func GetNodeInfo(ctx context.Context, verbose bool) (map[string]string, error) {
 	nodeInfo := make(map[string]string)
-
-	if verbose {
-		fmt.Printf("Retrieving node information...\n")
-	}
 
 	// This is a placeholder implementation
 	// In a real scenario, this would use the Kubernetes client to get node info
@@ -727,104 +718,44 @@ func FormatEnhancedTestResultForHierarchy(testName string, result EnhancedTestRe
 
 // FormatEnhancedTestSummary formats comprehensive test summaries with Expected vs Received details
 func FormatEnhancedTestSummary(timedResults []TimedTestResult, testNames []string, displayNames map[string]string, verbose bool) {
-	fmt.Println("\n📊 Detailed Test Summary:")
-	fmt.Println("================================================================================")
+	// Use the global logger instead of direct console output
+	logger := GetGlobalMultiChannelLogger()
+	if logger != nil {
+		// Use structured logging for better output control
+		for i, result := range timedResults {
+			testKey := testNames[i]
+			displayName := displayNames[testKey]
+			if displayName == "" {
+				displayName = testKey
+			}
 
+			duration := result.EndTime.Sub(result.StartTime).Seconds()
+
+			if result.TestResult.Success {
+				logger.LogInfo("✅ %s: PASSED (%.1fs)", displayName, duration)
+			} else {
+				logger.LogError("❌ %s: FAILED (%.1fs)", displayName, duration)
+			}
+		}
+		return
+	}
+
+	// Fallback to simplified console output if no logger available
 	for i, result := range timedResults {
 		testKey := testNames[i]
 		displayName := displayNames[testKey]
 		if displayName == "" {
-			displayName = testKey // fallback to test key if no display name
+			displayName = testKey
 		}
 
 		duration := result.EndTime.Sub(result.StartTime).Seconds()
 
 		if result.TestResult.Success {
 			fmt.Printf("✅ %s: PASSED (%.1fs)\n", displayName, duration)
-
-			// In verbose mode, show enhanced Expected vs Received details
-			if verbose {
-				// Determine the correct expectation key based on test type
-				var expectationKey string
-				var isNetworkingTest bool
-
-				// Check if this is a networking test (no policy suffix needed)
-				networkingTestKeys := []string{"pod-to-pod-same-node", "pod-to-pod-cross-node", "service-clusterip",
-					"service-nodeport", "service-loadbalancer", "service-cross-node", "dns-resolution"}
-
-				for _, netKey := range networkingTestKeys {
-					if testKey == netKey {
-						expectationKey = testKey
-						isNetworkingTest = true
-						break
-					}
-				}
-
-				// For policy tests, add "-policy" suffix
-				if !isNetworkingTest {
-					expectationKey = testKey + "-policy"
-				}
-
-				if expectation, exists := PolicyExpectations[expectationKey]; exists {
-					fmt.Printf("   📋 Expected: %s (%s)\n", expectation.Expected, expectation.Explanation)
-
-					// Extract real connectivity data from test results only
-					var receivedParts []string
-					if isNetworkingTest {
-						receivedParts = extractRealConnectivityData(result.TestResult)
-					} else {
-						receivedParts = extractRealPolicyData(result.TestResult, testKey)
-					}
-
-					if len(receivedParts) > 0 {
-						fmt.Printf("   📥 Received: %s\n", strings.Join(receivedParts, ", "))
-					}
-
-					// Show result interpretation
-					interpretationText := strings.ToLower(expectation.Expected)
-					if strings.Contains(interpretationText, "success") || strings.Contains(interpretationText, "200") {
-						if isNetworkingTest {
-							fmt.Printf("   🎯 Result: Network infrastructure working correctly - %s\n", interpretationText)
-						} else {
-							fmt.Printf("   🎯 Result: Policy working correctly - %s\n", interpretationText)
-						}
-					} else {
-						if isNetworkingTest {
-							fmt.Printf("   🎯 Result: Network behavior confirmed - %s\n", interpretationText)
-						} else {
-							fmt.Printf("   🎯 Result: Policy behavior confirmed - %s\n", interpretationText)
-						}
-					}
-				} else {
-					// Fallback to basic message for tests without expectations
-					message := result.TestResult.Message
-					if idx := strings.LastIndex(message, ": "); idx >= 0 {
-						message = message[idx+2:]
-					}
-					fmt.Printf("   Message: %s\n", message)
-				}
-			} else {
-				// Non-verbose: just show basic success message
-				message := result.TestResult.Message
-				if idx := strings.LastIndex(message, ": "); idx >= 0 {
-					message = message[idx+2:]
-				}
-				fmt.Printf("   Message: %s\n", message)
-			}
 		} else {
 			fmt.Printf("❌ %s: FAILED (%.1fs)\n", displayName, duration)
-
-			// Extract clean error message
-			message := result.TestResult.Message
-			if idx := strings.LastIndex(message, ": "); idx >= 0 {
-				message = message[idx+2:]
-			}
-			fmt.Printf("   Error: %s\n", message)
 		}
-		fmt.Println()
 	}
-
-	fmt.Println("================================================================================")
 }
 
 // extractRealConnectivityData extracts real connectivity data from test result details

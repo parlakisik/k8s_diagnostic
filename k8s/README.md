@@ -77,10 +77,10 @@ Since the images don't exist on Docker Hub, build them locally:
 
 ```bash
 # Build CLI image (uses pre-built binary)
-docker build -f Dockerfile.cli-simple -t [username]/k8s-diagnostic-cli:latest .
+docker build -f docker/Dockerfile.cli-simple -t [username]/k8s-diagnostic-cli:latest .
 
 # Build UI image (builds Next.js app)
-docker build -f Dockerfile.ui -t [username]/k8s-diagnostic-ui:latest .
+docker build -f docker/Dockerfile.ui -t [username]/k8s-diagnostic-ui:latest .
 
 # Verify images were created
 docker images | grep k8s-diagnostic

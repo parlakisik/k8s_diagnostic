@@ -19,7 +19,7 @@ fi
 
 # Build Docker containers
 echo "🐳 Building Docker containers..."
-docker compose build
+docker compose -f docker/docker-compose.yml build
 
 # Verify containers were built
 if [ $? -eq 0 ]; then
@@ -27,11 +27,11 @@ if [ $? -eq 0 ]; then
     echo "✅ Build complete!"
     echo "================================================="
     echo "🚀 To start the services, run:"
-    echo "   docker compose up -d k8s-diagnostic-ui"
+    echo "   docker compose -f docker/docker-compose.yml up -d k8s-diagnostic-ui"
     echo ""
     echo "🖥️  UI will be available at: http://localhost:3000"
     echo "🛠️  To run CLI tests:"
-    echo "   docker compose run --rm k8s-diagnostic-cli test --help"
+    echo "   docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli test --help"
     echo ""
     echo "📋 Available make targets:"
     echo "   make docker-up    # Build and start services"

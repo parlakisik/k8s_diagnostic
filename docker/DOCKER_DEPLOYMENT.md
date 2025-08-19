@@ -18,10 +18,10 @@ This guide shows you exactly how to use k8s-diagnostic with Docker containers. A
 cd k8s_diagnostic
 
 # 2. Build containers (first time only)
-docker compose build
+docker compose -f docker/docker-compose.yml build
 
 # 3. Start web interface
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 
 # 4. Open your browser
 open http://localhost:3000
@@ -57,7 +57,7 @@ The Docker setup creates two specialized containers:
 
 **Start the web UI:**
 ```bash
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 ```
 
 **Access the interface:**
@@ -79,7 +79,7 @@ docker compose up k8s-diagnostic-ui -d
 
 **Run a single test:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node --verbose
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node --verbose
 ```
 
 **Expected output:**
@@ -91,22 +91,22 @@ docker compose run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-po
 
 **Run all L3 policy tests:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
 ```
 
 **Run with maximum verbosity:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies --verbose
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies --verbose
 ```
 
 **List available tests:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --list
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --list
 ```
 
 **Clean up test resources:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone deepclean
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone deepclean
 ```
 
 ## 📋 Common Test Scenarios
@@ -115,29 +115,29 @@ docker compose run --rm k8s-diagnostic-cli-standalone deepclean
 
 **Basic L3 (Layer 3) Network Policies:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
 ```
 
 **L4 (Layer 4) Port-based Policies:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies
 ```
 
 **L7 (Layer 7) Application Policies:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l7-policies
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l7-policies
 ```
 
 **Individual Test Types:**
 ```bash
 # Pod connectivity tests
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
 
 # Service connectivity tests  
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list service-connectivity
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list service-connectivity
 
 # DNS resolution tests
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list dns-resolution
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list dns-resolution
 ```
 
 ### Batch Testing via Web Interface
@@ -198,41 +198,41 @@ ls -la test_results/
 
 **Start web interface:**
 ```bash
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 ```
 
 **Stop all containers:**
 ```bash
-docker compose down
+docker compose -f docker/docker-compose.yml down
 ```
 
 **View running containers:**
 ```bash
-docker compose ps
+docker compose -f docker/docker-compose.yml ps
 ```
 
 **View logs:**
 ```bash
 # Web UI logs
-docker compose logs k8s-diagnostic-ui
+docker compose -f docker/docker-compose.yml logs k8s-diagnostic-ui
 
 # Follow logs in real-time
-docker compose logs -f k8s-diagnostic-ui
+docker compose -f docker/docker-compose.yml logs -f k8s-diagnostic-ui
 ```
 
 ### Rebuilding Containers
 
 **After code changes:**
 ```bash
-docker compose build --no-cache
-docker compose restart k8s-diagnostic-ui
+docker compose -f docker/docker-compose.yml build --no-cache
+docker compose -f docker/docker-compose.yml restart k8s-diagnostic-ui
 ```
 
 **Full clean rebuild:**
 ```bash
-docker compose down
-docker compose build --no-cache
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml down
+docker compose -f docker/docker-compose.yml build --no-cache
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 ```
 
 ## 🩺 Troubleshooting
@@ -242,18 +242,18 @@ docker compose up k8s-diagnostic-ui -d
 **Problem: Container won't start**
 ```bash
 # Check container status
-docker compose ps
+docker compose -f docker/docker-compose.yml ps
 
 # View error logs
-docker compose logs k8s-diagnostic-ui
+docker compose -f docker/docker-compose.yml logs k8s-diagnostic-ui
 ```
 
 **Solution: Common fixes**
 ```bash
 # Port 3000 already in use
-docker compose down
+docker compose -f docker/docker-compose.yml down
 lsof -ti:3000 | xargs kill -9
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 
 # Permission issues
 sudo chown -R $USER:$USER test_results/
@@ -267,7 +267,7 @@ sudo chown -R $USER:$USER test_results/
 kubectl get nodes
 
 # Test kubectl in container
-docker compose run --rm k8s-diagnostic-cli-standalone kubectl get nodes
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone kubectl get nodes
 ```
 
 **Expected output:**
@@ -290,7 +290,7 @@ This error means the system is trying to build locally instead of using containe
 **Solution:** Make sure you're using the web interface or the correct CLI commands:
 ```bash
 # ✅ Correct: Uses container
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
 
 # ❌ Wrong: Tries to build locally
 k8s-diagnostic test --test-list pod-to-pod-same-node
@@ -348,26 +348,26 @@ ls -la test_results/
 
 **1. Container Build:**
 ```bash
-docker compose build
+docker compose -f docker/docker-compose.yml build
 # Expected: All services build successfully
 ```
 
 **2. Web Interface:**
 ```bash
-docker compose up k8s-diagnostic-ui -d
+docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
 curl -s http://localhost:3000 | grep "K8s Diagnostic"
 # Expected: HTML with "K8s Diagnostic Dashboard" title
 ```
 
 **3. Kubernetes Access:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone kubectl get nodes
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone kubectl get nodes
 # Expected: Your cluster nodes listed
 ```
 
 **4. Test Execution:**
 ```bash
-docker compose run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-list pod-to-pod-same-node
 # Expected: ✅ PASS result
 ```
 
@@ -384,14 +384,14 @@ ls -la test_results/
 **Create custom test groups:**
 ```bash
 # Run specific policy tests
-docker compose run --rm k8s-diagnostic-cli-standalone test \
+docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test \
   --test-list "policy-deny,policy-allow,dns-resolution"
 ```
 
 **Environment-specific testing:**
 ```bash
 # Test with custom kubeconfig
-docker compose run --rm \
+docker compose -f docker/docker-compose.yml run --rm \
   -v /path/to/custom/kubeconfig:/app/shared/.kube/config:ro \
   k8s-diagnostic-cli-standalone test --test-group l3-policies
 ```
@@ -402,17 +402,17 @@ docker compose run --rm \
 ```yaml
 - name: Run k8s-diagnostic tests
   run: |
-    docker compose build
-    docker compose up k8s-diagnostic-ui -d
-    docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
-    docker compose down
+    docker compose -f docker/docker-compose.yml build
+    docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d
+    docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l3-policies
+    docker compose -f docker/docker-compose.yml down
 ```
 
 **Example Jenkins Pipeline:**
 ```groovy
 stage('K8s Diagnostics') {
     steps {
-        sh 'docker compose run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies'
+        sh 'docker compose -f docker/docker-compose.yml run --rm k8s-diagnostic-cli-standalone test --test-group l4-policies'
         archiveArtifacts 'test_results/*.json'
     }
 }
@@ -423,10 +423,10 @@ stage('K8s Diagnostics') {
 **Faster rebuilds:**
 ```bash
 # Build specific service only
-docker compose build k8s-diagnostic-ui
+docker compose -f docker/docker-compose.yml build k8s-diagnostic-ui
 
 # Use build cache
-docker compose build --parallel
+docker compose -f docker/docker-compose.yml build --parallel
 ```
 
 **Resource limits:**
@@ -447,19 +447,19 @@ services:
 ### Stop Services
 ```bash
 # Stop containers but keep them
-docker compose stop
+docker compose -f docker/docker-compose.yml stop
 
 # Stop and remove containers
-docker compose down
+docker compose -f docker/docker-compose.yml down
 
 # Stop, remove containers, and clean networks
-docker compose down --remove-orphans
+docker compose -f docker/docker-compose.yml down --remove-orphans
 ```
 
 ### Clean Docker Resources
 ```bash
 # Remove k8s-diagnostic images
-docker compose down --rmi all
+docker compose -f docker/docker-compose.yml down --rmi all
 
 # Remove unused Docker resources
 docker system prune -f
@@ -474,18 +474,18 @@ Your test results in `test_results/` are stored on your computer and will **not*
 ## 🎯 Summary
 
 **For quick testing:** Use the web interface at http://localhost:3000
-**For automation:** Use direct CLI commands with `docker compose run`
+**For automation:** Use direct CLI commands with `docker compose -f docker/docker-compose.yml run`
 **For persistence:** All results save to your local `test_results/` directory
-**For cleanup:** Use `docker compose down` when finished
+**For cleanup:** Use `docker compose -f docker/docker-compose.yml down` when finished
 
 The containerized setup provides the same functionality as local installation but with guaranteed dependency isolation and consistent behavior across different environments.
 
 ## 🆘 Support
 
 If issues persist:
-1. **Check logs:** `docker compose logs k8s-diagnostic-ui`
+1. **Check logs:** `docker compose -f docker/docker-compose.yml logs k8s-diagnostic-ui`
 2. **Verify prerequisites:** Docker, Docker Compose, kubectl access
 3. **Test basic connectivity:** `kubectl get nodes`
-4. **Restart clean:** `docker compose down && docker compose up k8s-diagnostic-ui -d`
+4. **Restart clean:** `docker compose -f docker/docker-compose.yml down && docker compose -f docker/docker-compose.yml up k8s-diagnostic-ui -d`
 
 All commands in this guide have been tested and verified in real environments. Copy-paste them with confidence!

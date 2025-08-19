@@ -683,7 +683,8 @@ export default function CiliumConfigModal({
                         <span className="text-green-600 text-xl" style={{ marginRight: '5px' }}>✅</span>
                         <span className="font-inter text-green-700 text-sm" style={{ marginRight: '7px' }}>Active Features:</span>
                         <span className="font-poppins font-bold text-green-800 text-2xl">
-                          {validationData.summary.enabledCount || 0}
+                          {(validationData && validationData.summary && validationData.summary.enabledCount) || 
+                           (insights && insights.enabledFeatures && insights.enabledFeatures.length) || 0}
                         </span>
                       </div>
                     </div>
@@ -692,21 +693,27 @@ export default function CiliumConfigModal({
                         <span className="text-blue-600 text-xl" style={{ marginRight: '5px' }}>⚠️</span>
                         <span className="font-inter text-blue-700 text-sm" style={{ marginRight: '7px' }}>Available to Enable:</span>
                         <span className="font-poppins font-bold text-blue-800 text-2xl">
-                          {validationData.summary.availableCount || 0}
+                          {(validationData && validationData.summary && validationData.summary.availableCount) || 0}
                         </span>
                       </div>
                     </div>
                   </div>
 
                   {/* Active Features Section */}
-                  {validationData.summary.enabledFeatures && validationData.summary.enabledFeatures.length > 0 && (
+                  {((validationData && validationData.summary && validationData.summary.enabledFeatures && validationData.summary.enabledFeatures.length > 0) ||
+                    (insights && insights.enabledFeatures && insights.enabledFeatures.length > 0)) && (
                     <div>
                       <h4 className="font-poppins font-bold text-gray-800 text-lg mb-4 flex items-center">
                         <span className="text-green-600 text-lg" style={{ marginRight: '5px' }}>✅</span>
-                        Active Features ({validationData.summary.enabledFeatures.length})
+                        Active Features ({((validationData && validationData.summary && validationData.summary.enabledFeatures && validationData.summary.enabledFeatures.length) || 
+                                         (insights && insights.enabledFeatures && insights.enabledFeatures.length) || 0)})
                       </h4>
                       <div className="space-y-4" style={{ marginTop: '15px' }}>
-                        {validationData.summary.enabledFeatures.map((feature, index) => (
+                        {/* Show validation data if available, otherwise show insights data */}
+                        {(validationData && validationData.summary && validationData.summary.enabledFeatures ? 
+                          validationData.summary.enabledFeatures : 
+                          (insights && insights.enabledFeatures ? insights.enabledFeatures.map((featureName) => ({ displayName: featureName })) : [])
+                        ).map((feature, index) => (
                           <div key={index} style={{ marginBottom: '15px' }}>
                             {/* Line 1: Emoji + Feature Name + Category (all bold) */}
                             <div className="font-inter font-black text-gray-800 text-base" style={{ marginBottom: '2px', fontWeight: '900' }}>
@@ -820,19 +827,14 @@ export default function CiliumConfigModal({
                       <div className="flex items-center text-sm">
                         <span className="text-green-600" style={{ marginRight: '5px' }}>✅</span>
                         <span className="font-inter text-gray-700">
-                          {validationData.summary.enabledCount || 0} features are active and working properly
+                          {(validationData && validationData.summary && validationData.summary.enabledCount) || 
+                           (insights && insights.enabledFeatures && insights.enabledFeatures.length) || 0} features are active and working properly
                         </span>
                       </div>
                       <div className="flex items-center text-sm">
                         <span className="text-blue-600" style={{ marginRight: '5px' }}>⚠️</span>
                         <span className="font-inter text-gray-700">
-                          {validationData.summary.availableCount || 0} additional features can be enabled if needed
-                        </span>
-                      </div>
-                      <div className="flex items-center text-sm">
-                        <span className="text-gray-600" style={{ marginRight: '5px' }}>ℹ️</span>
-                        <span className="font-inter text-gray-700">
-                          Your Cilium installation is healthy and functioning correctly
+                          {(validationData && validationData.summary && validationData.summary.availableCount) || 0} additional features can be enabled if needed
                         </span>
                       </div>
                     </div>
