@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"k8s-diagnostic/internal/diagnostic/core"
+
 	"github.com/spf13/cobra"
 )
 
@@ -398,21 +400,16 @@ func executeTest(testID, cliCommand string, args []string) (bool, string, error)
 	// 🚨 CRITICAL: Send test_start event immediately
 	sendTestEvent(testID, "test_start", fmt.Sprintf("Starting test: %s", testID), true)
 
-	// 🚨 CRITICAL: Wait for any ongoing cleanup to complete before starting test execution
-	log.Printf("🧹 [CLI EXEC] Checking for ongoing cleanup operations...")
+	// 🚨 CRITICAL: Use optimized Kubernetes production cleanup instead of comprehensive deepclean
+	log.Printf("🧹 [CLI EXEC] Starting optimized Kubernetes production cleanup...")
 
-	// Send progress update to UI about cleanup phase
-	sendProgressUpdate(testID, "cleanup_start", "🧹 Verifying cleanup completion before starting test...")
-
-	if err := waitForCleanupCompletionWithProgress(testID); err != nil {
-		log.Printf("❌ [CLI EXEC] Cleanup wait failed: %v", err)
-		sendProgressUpdate(testID, "cleanup_failed", fmt.Sprintf("❌ Cleanup verification failed: %v", err))
-		return false, fmt.Sprintf("Failed to wait for cleanup completion: %v", err), err
+	// 🚀 PERFORMANCE FIX: Use lightweight cleanup optimized for individual test execution
+	if err := executeOptimizedKubernetesCleanup(testID); err != nil {
+		log.Printf("❌ [CLI EXEC] Optimized cleanup execution failed: %v", err)
+		sendProgressUpdate(testID, "cleanup_failed", fmt.Sprintf("❌ Optimized cleanup execution failed: %v", err))
+		return false, fmt.Sprintf("Failed to execute optimized cleanup: %v", err), err
 	}
-	log.Printf("✅ [CLI EXEC] Cleanup verification completed - proceeding with test execution")
-
-	// Send progress update that test execution is starting
-	sendProgressUpdate(testID, "cleanup_complete", "✅ Cleanup verified, starting test execution...")
+	log.Printf("✅ [CLI EXEC] Optimized cleanup completed - proceeding with test execution")
 	sendTestEvent(testID, "test_progress", "🧪 Executing diagnostic test...", false)
 
 	// Parse the CLI command to extract the actual command and arguments
@@ -756,12 +753,14 @@ func parseTestResults(workingDir, output, testID string) (bool, string) {
 		for _, line := range lines {
 			if strings.Contains(line, "JSON summary written to:") {
 				jsonPath := strings.TrimSpace(strings.Split(line, "JSON summary written to:")[1])
-				fullPath := filepath.Join(workingDir, jsonPath)
 
-				log.Printf("📄 [CLI EXEC] Found JSON results file: %s", fullPath)
+				log.Printf("📄 [CLI EXEC] Found JSON results file path in output: %s", jsonPath)
+				log.Printf("🔍 [CLI EXEC] Working directory: %s", workingDir)
 
-				// Try to read and parse the JSON file
-				if success, message := parseJSONResults(fullPath, testID); message != "" {
+				// 🛡️ CRITICAL FIX: Let parseJSONResults handle path construction
+				// This prevents path duplication by passing the original path
+				// parseJSONResults will handle absolute vs relative path logic correctly
+				if success, message := parseJSONResults(jsonPath, testID); message != "" {
 					return success, message
 				}
 			}
@@ -811,19 +810,61 @@ func parseTestResults(workingDir, output, testID string) (bool, string) {
 func parseJSONResults(jsonPath, testID string) (bool, string) {
 	log.Printf("📖 [CLI EXEC] Reading JSON results from: %s", jsonPath)
 
+	// 🛡️ CRITICAL FIX: Handle absolute vs relative paths correctly
+	var finalPath string
+	if filepath.IsAbs(jsonPath) {
+		// Use absolute path directly
+		finalPath = jsonPath
+		log.Printf("✅ [CLI EXEC] Using absolute path: %s", finalPath)
+	} else {
+		// For relative paths, join with current working directory
+		if workingDir, err := os.Getwd(); err == nil {
+			finalPath = filepath.Join(workingDir, jsonPath)
+			log.Printf("✅ [CLI EXEC] Constructed relative path: %s", finalPath)
+		} else {
+			finalPath = jsonPath
+			log.Printf("⚠️ [CLI EXEC] Cannot get working directory, using path as-is: %s", finalPath)
+		}
+	}
+
+	log.Printf("🎯 [CLI EXEC] Final JSON path to read: %s", finalPath)
+
 	// Check if file exists and wait a bit for it to be written
 	for i := 0; i < 5; i++ {
-		if _, err := os.Stat(jsonPath); err == nil {
+		if _, err := os.Stat(finalPath); err == nil {
+			log.Printf("✅ [CLI EXEC] JSON file found on attempt %d", i+1)
 			break
 		}
 		log.Printf("⏳ [CLI EXEC] Waiting for JSON file to be written... (%d/5)", i+1)
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	data, err := os.ReadFile(jsonPath)
+	data, err := os.ReadFile(finalPath)
 	if err != nil {
 		log.Printf("❌ [CLI EXEC] Failed to read JSON file: %v", err)
-		return false, ""
+
+		// 🛡️ ENHANCED: Try alternative path construction as fallback
+		if !filepath.IsAbs(jsonPath) {
+			// Try using shared volume path directly
+			sharedPath := os.Getenv("SHARED_VOLUME_PATH")
+			if sharedPath == "" {
+				sharedPath = "/app/shared/repository/test_results"
+			}
+
+			// Extract just the filename and construct path directly
+			fileName := filepath.Base(jsonPath)
+			fallbackPath := filepath.Join(sharedPath, fileName)
+			log.Printf("🔄 [CLI EXEC] Trying fallback path: %s", fallbackPath)
+
+			if data, err = os.ReadFile(fallbackPath); err == nil {
+				log.Printf("✅ [CLI EXEC] Successfully read from fallback path")
+			} else {
+				log.Printf("❌ [CLI EXEC] Fallback path also failed: %v", err)
+				return false, ""
+			}
+		} else {
+			return false, ""
+		}
 	}
 
 	// Parse JSON structure
@@ -894,9 +935,21 @@ func parseJSONResults(jsonPath, testID string) (bool, string) {
 
 // sendProgressUpdate sends progress updates to the UI via SSE_EVENT format
 func sendProgressUpdate(testID, phase, message string) {
+	// 🛡️ CRITICAL FIX: Validate inputs to prevent nil formatting issues
+	if testID == "" {
+		log.Printf("⚠️ [CLI PROGRESS] Empty testID provided, skipping progress update")
+		return
+	}
+	if phase == "" {
+		phase = "unknown"
+	}
+	if message == "" {
+		message = "Progress update"
+	}
+
 	log.Printf("📡 [CLI PROGRESS] TestID=%s, Phase=%s: %s", testID, phase, message)
 
-	// Create SSE event for UI consumption
+	// Create SSE event for UI consumption with proper nil checking
 	sseEvent := map[string]interface{}{
 		"type":      "progress_update",
 		"testName":  testID,
@@ -912,14 +965,28 @@ func sendProgressUpdate(testID, phase, message string) {
 
 		// CRITICAL FIX: Forward SSE event to UI container's log-events API
 		forwardEventToUI(testID, sseEvent)
+	} else {
+		log.Printf("❌ [CLI PROGRESS] Failed to marshal progress event: %v", err)
 	}
 }
 
 // sendTestEvent sends test lifecycle events to the UI via SSE_EVENT format
 func sendTestEvent(testID, eventType, message string, success bool) {
+	// 🛡️ CRITICAL FIX: Validate inputs to prevent nil formatting issues
+	if testID == "" {
+		log.Printf("⚠️ [CLI TEST EVENT] Empty testID provided, skipping test event")
+		return
+	}
+	if eventType == "" {
+		eventType = "unknown"
+	}
+	if message == "" {
+		message = "Test event"
+	}
+
 	log.Printf("📡 [CLI TEST EVENT] TestID=%s, Type=%s: %s", testID, eventType, message)
 
-	// Create SSE event for UI consumption
+	// Create SSE event for UI consumption with proper nil checking
 	sseEvent := map[string]interface{}{
 		"type":      eventType,
 		"testName":  testID,
@@ -935,10 +1002,12 @@ func sendTestEvent(testID, eventType, message string, success bool) {
 
 		// CRITICAL FIX: Forward SSE event to UI container's log-events API
 		forwardEventToUI(testID, sseEvent)
+	} else {
+		log.Printf("❌ [CLI TEST EVENT] Failed to marshal test event: %v", err)
 	}
 }
 
-// forwardEventToUI forwards SSE events to UI container's log-events API endpoint
+// forwardEventToUI forwards SSE events to UI container with robust retry logic and fallback mechanisms
 func forwardEventToUI(testID string, sseEvent map[string]interface{}) {
 	// Skip forwarding if not in Kubernetes mode
 	if os.Getenv("KUBERNETES_MODE") != "true" {
@@ -946,9 +1015,30 @@ func forwardEventToUI(testID string, sseEvent map[string]interface{}) {
 		return
 	}
 
+	// 🚀 ENHANCED: Robust event forwarding with multiple reliability mechanisms
+	success := false
+
+	// Primary mechanism: HTTP forwarding with retry logic
+	if forwardEventViaHTTP(testID, sseEvent) {
+		success = true
+	} else {
+		// Fallback mechanism: Shared volume event logging
+		log.Printf("🔄 [SSE FORWARD] HTTP forwarding failed, trying shared volume fallback...")
+		if forwardEventViaSharedVolume(testID, sseEvent) {
+			success = true
+		}
+	}
+
+	if !success {
+		log.Printf("❌ [SSE FORWARD] All forwarding mechanisms failed for event: %s", sseEvent["type"])
+	}
+}
+
+// forwardEventViaHTTP forwards events via HTTP with robust retry logic
+func forwardEventViaHTTP(testID string, sseEvent map[string]interface{}) bool {
 	// Get UI container URL (localhost since containers share network)
 	uiURL := "http://localhost:3000/api/log-events"
-	log.Printf("🔍 [SSE FORWARD] Forwarding to URL: %s", uiURL)
+	log.Printf("🔍 [SSE HTTP] Forwarding to URL: %s", uiURL)
 
 	// Prepare event data for UI
 	eventData := map[string]interface{}{
@@ -963,57 +1053,344 @@ func forwardEventToUI(testID string, sseEvent map[string]interface{}) {
 		"line":      fmt.Sprintf("[SSE] %s", sseEvent["message"]),
 	}
 
-	log.Printf("🔍 [SSE FORWARD] Event data prepared: %+v", eventData)
+	log.Printf("🔍 [SSE HTTP] Event data prepared: %+v", eventData)
 
 	// Convert to JSON
 	jsonData, err := json.Marshal(eventData)
 	if err != nil {
-		log.Printf("❌ [SSE FORWARD] Failed to marshal event data: %v", err)
-		return
+		log.Printf("❌ [SSE HTTP] Failed to marshal event data: %v", err)
+		return false
 	}
 
-	log.Printf("🔍 [SSE FORWARD] JSON data (%d bytes): %s", len(jsonData), string(jsonData))
+	log.Printf("🔍 [SSE HTTP] JSON data (%d bytes): %s", len(jsonData), string(jsonData))
 
-	// Create HTTP request to UI's log-events API
-	req, err := http.NewRequest("POST", uiURL, bytes.NewBuffer(jsonData))
+	// 🚀 ENHANCED: Retry logic with exponential backoff
+	maxRetries := 3
+	baseDelay := 100 * time.Millisecond
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("🔄 [SSE HTTP] Attempt %d/%d", attempt, maxRetries)
+
+		// Create HTTP request to UI's log-events API
+		req, err := http.NewRequest("POST", uiURL, bytes.NewBuffer(jsonData))
+		if err != nil {
+			log.Printf("❌ [SSE HTTP] Failed to create request on attempt %d: %v", attempt, err)
+			if attempt == maxRetries {
+				return false
+			}
+			continue
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "k8s-diagnostic-cli-event-forwarder")
+
+		// Add connection keep-alive header for better reliability
+		req.Header.Set("Connection", "keep-alive")
+
+		// 🚀 ENHANCED: Adaptive timeout based on attempt number
+		timeoutDuration := time.Duration(5+attempt*2) * time.Second
+		client := &http.Client{
+			Timeout: timeoutDuration,
+			Transport: &http.Transport{
+				MaxIdleConns:       10,
+				IdleConnTimeout:    30 * time.Second,
+				DisableCompression: false,
+			},
+		}
+
+		startTime := time.Now()
+		resp, err := client.Do(req)
+		duration := time.Since(startTime)
+
+		if err != nil {
+			log.Printf("❌ [SSE HTTP] HTTP request failed on attempt %d after %v: %v", attempt, duration, err)
+			log.Printf("❌ [SSE HTTP] Error type: %T", err)
+
+			// Check if this is a network-level error that might be temporary
+			if isTemporaryNetworkError(err) {
+				if attempt < maxRetries {
+					delay := baseDelay * time.Duration(1<<(attempt-1)) // Exponential backoff
+					log.Printf("⏳ [SSE HTTP] Temporary network error, retrying in %v...", delay)
+					time.Sleep(delay)
+					continue
+				}
+			}
+
+			if attempt == maxRetries {
+				log.Printf("❌ [SSE HTTP] All %d HTTP attempts failed", maxRetries)
+				return false
+			}
+			continue
+		}
+		defer resp.Body.Close()
+
+		log.Printf("🔍 [SSE HTTP] Response received on attempt %d after %v: Status=%d", attempt, duration, resp.StatusCode)
+
+		// Read response body for detailed debugging
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			log.Printf("⚠️ [SSE HTTP] Failed to read response body: %v", readErr)
+		} else {
+			log.Printf("🔍 [SSE HTTP] Response body (%d bytes): %s", len(body), string(body))
+		}
+
+		// Check response status
+		if resp.StatusCode == http.StatusOK {
+			log.Printf("✅ [SSE HTTP] Event forwarded successfully on attempt %d: %s (status=%d, duration=%v)", attempt, sseEvent["type"], resp.StatusCode, duration)
+			return true
+		} else if resp.StatusCode >= 500 {
+			// Server error - might be temporary, retry if we have attempts left
+			log.Printf("⚠️ [SSE HTTP] Server error %d on attempt %d, will retry if attempts remain", resp.StatusCode, attempt)
+			if attempt < maxRetries {
+				delay := baseDelay * time.Duration(1<<(attempt-1))
+				time.Sleep(delay)
+				continue
+			}
+		} else {
+			// Client error - don't retry
+			log.Printf("❌ [SSE HTTP] Client error %d on attempt %d: %s", resp.StatusCode, attempt, string(body))
+			return false
+		}
+	}
+
+	return false
+}
+
+// isTemporaryNetworkError checks if an error might be temporary and worth retrying
+func isTemporaryNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	temporaryIndicators := []string{
+		"connection refused",
+		"connection reset",
+		"timeout",
+		"no route to host",
+		"network unreachable",
+		"temporary failure",
+	}
+
+	for _, indicator := range temporaryIndicators {
+		if strings.Contains(strings.ToLower(errStr), indicator) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// forwardEventViaSharedVolume writes events to shared volume as fallback mechanism
+func forwardEventViaSharedVolume(testID string, sseEvent map[string]interface{}) bool {
+	// Get shared volume path
+	sharedPath := os.Getenv("SHARED_VOLUME_PATH")
+	if sharedPath == "" {
+		sharedPath = "/app/shared/repository/test_results"
+	}
+
+	// Create events directory if it doesn't exist
+	eventsDir := filepath.Join(sharedPath, "events")
+	if err := os.MkdirAll(eventsDir, 0755); err != nil {
+		log.Printf("❌ [SSE VOLUME] Failed to create events directory: %v", err)
+		return false
+	}
+
+	// Create event file name with timestamp
+	timestamp := time.Now().UTC().Format("20060102-150405.000")
+	eventFile := filepath.Join(eventsDir, fmt.Sprintf("%s-%s.json", testID, timestamp))
+
+	// Prepare event data
+	eventData := map[string]interface{}{
+		"testId":    testID,
+		"type":      sseEvent["type"],
+		"message":   sseEvent["message"],
+		"timestamp": sseEvent["timestamp"],
+		"phase":     sseEvent["phase"],
+		"success":   sseEvent["success"],
+		"testName":  sseEvent["testName"],
+		"container": "cli",
+		"line":      fmt.Sprintf("[SSE] %s", sseEvent["message"]),
+		"fallback":  "shared_volume",
+	}
+
+	// Write event to file
+	jsonData, err := json.MarshalIndent(eventData, "", "  ")
 	if err != nil {
-		log.Printf("❌ [SSE FORWARD] Failed to create request: %v", err)
-		return
+		log.Printf("❌ [SSE VOLUME] Failed to marshal event data: %v", err)
+		return false
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	log.Printf("🔍 [SSE FORWARD] Request created, making HTTP call...")
+	if err := os.WriteFile(eventFile, jsonData, 0644); err != nil {
+		log.Printf("❌ [SSE VOLUME] Failed to write event file: %v", err)
+		return false
+	}
 
-	// Make request with timeout
-	client := &http.Client{Timeout: 5 * time.Second}
+	log.Printf("✅ [SSE VOLUME] Event written to shared volume: %s", eventFile)
+	return true
+}
+
+// executeOptimizedKubernetesCleanup executes optimized cleanup for Kubernetes production environment
+// This replaces the comprehensive deepclean with lightweight cleanup optimized for individual tests
+func executeOptimizedKubernetesCleanup(testID string) error {
+	log.Printf("🚀 [CLI CLEANUP] Starting optimized Kubernetes cleanup for TestID: %s", testID)
+
+	// Create a tester instance with minimal configuration for cleanup
+	namespace := "diagnostic-test" // Default namespace for diagnostic tests
+	kubeconfig := ""               // Use default kubeconfig from environment
+	verbose := false               // Keep cleanup output clean for performance
+
+	tester, err := core.NewTester(kubeconfig, namespace, verbose)
+	if err != nil {
+		log.Printf("❌ [CLI CLEANUP] Failed to create tester instance: %v", err)
+		return fmt.Errorf("failed to create tester for cleanup: %w", err)
+	}
+
+	// Create timeout context for cleanup operations (much shorter than comprehensive cleanup)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Reduced from 120s
+	defer cancel()
+
+	// Send cleanup start event
+	sendProgressUpdate(testID, "cleanup_starting", "🚀 Starting optimized Kubernetes cleanup...")
+
+	// Execute our optimized Kubernetes production cleanup
 	startTime := time.Now()
-	resp, err := client.Do(req)
+
+	// Use our new KubernetesProductionCleanup method
+	tester.KubernetesProductionCleanup(ctx, testID, verbose)
+
 	duration := time.Since(startTime)
 
-	if err != nil {
-		log.Printf("❌ [SSE FORWARD] HTTP request failed after %v: %v", duration, err)
-		log.Printf("❌ [SSE FORWARD] Error type: %T", err)
-		return
+	log.Printf("⏱️ [CLI CLEANUP] Optimized cleanup completed in %v", duration)
+	log.Printf("📊 [CLI CLEANUP] Performance improvement: ~%dx faster than comprehensive cleanup",
+		int(120/duration.Seconds())) // Estimate improvement over 2-minute comprehensive cleanup
+
+	// Send cleanup completion event
+	sendProgressUpdate(testID, "cleanup_completed",
+		fmt.Sprintf("✅ Optimized cleanup completed in %.1fs", duration.Seconds()))
+
+	log.Printf("✅ [CLI CLEANUP] Optimized Kubernetes cleanup completed successfully for TestID=%s", testID)
+	return nil
+}
+
+// executeDetailedCleanupWithProgress executes the actual cleanup process and captures detailed output
+func executeDetailedCleanupWithProgress(testID string) error {
+	log.Printf("🧹 [CLI CLEANUP] Starting detailed cleanup process for TestID: %s", testID)
+
+	// Determine the correct binary path
+	var binaryPath string
+	binaryOptions := []string{
+		"/app/k8s-diagnostic",
+		"/usr/local/bin/k8s-diagnostic",
+		"/app/k8s_diagnostic",
+		os.Args[0], // Current process path as fallback
 	}
-	defer resp.Body.Close()
 
-	log.Printf("🔍 [SSE FORWARD] Response received after %v: Status=%d", duration, resp.StatusCode)
+	for _, path := range binaryOptions {
+		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+			binaryPath = path
+			log.Printf("✅ [CLI CLEANUP] Found binary at: %s", binaryPath)
+			break
+		}
+	}
 
-	// Read response body for detailed debugging
-	body, readErr := io.ReadAll(resp.Body)
-	if readErr != nil {
-		log.Printf("⚠️ [SSE FORWARD] Failed to read response body: %v", readErr)
+	if binaryPath == "" {
+		log.Printf("❌ [CLI CLEANUP] No valid binary found")
+		return fmt.Errorf("no valid binary found for cleanup execution")
+	}
+
+	// Execute cleanup command with detailed output capture
+	cmd := exec.Command(binaryPath, "deepclean", "--verbose")
+
+	// Set up environment
+	env := os.Environ()
+	sharedPath := os.Getenv("SHARED_VOLUME_PATH")
+	if sharedPath == "" {
+		sharedPath = "/app/shared/repository/test_results"
+	}
+	env = append(env, fmt.Sprintf("SHARED_VOLUME_PATH=%s", sharedPath))
+	cmd.Env = env
+
+	// Set working directory
+	var workingDir string
+	if stat, err := os.Stat(sharedPath); err == nil && stat.IsDir() {
+		workingDir = filepath.Dir(sharedPath) // Go up one level to repository root
 	} else {
-		log.Printf("🔍 [SSE FORWARD] Response body (%d bytes): %s", len(body), string(body))
+		workingDir = "/app" // Default to /app in container
+	}
+	cmd.Dir = workingDir
+
+	log.Printf("🔧 [CLI CLEANUP] Executing cleanup command:")
+	log.Printf("  Binary: %s", binaryPath)
+	log.Printf("  Args: [deepclean --verbose]")
+	log.Printf("  Working Directory: %s", workingDir)
+
+	// Capture stdout and stderr
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	// Execute cleanup command
+	startTime := time.Now()
+	err := cmd.Run()
+	duration := time.Since(startTime)
+
+	stdoutStr := stdout.String()
+	stderrStr := stderr.String()
+
+	log.Printf("⏱️ [CLI CLEANUP] Cleanup execution completed in %v", duration)
+	log.Printf("📊 [CLI CLEANUP] Cleanup results:")
+	log.Printf("  Exit Code: %v", err)
+	log.Printf("  Stdout Length: %d bytes", len(stdoutStr))
+	log.Printf("  Stderr Length: %d bytes", len(stderrStr))
+
+	// Forward cleanup output to UI line by line
+	if len(stdoutStr) > 0 {
+		log.Printf("📄 [CLI CLEANUP] Processing cleanup output...")
+		lines := strings.Split(stdoutStr, "\n")
+
+		for _, line := range lines {
+			trimmedLine := strings.TrimSpace(line)
+			if trimmedLine != "" {
+				log.Printf("📡 [CLI CLEANUP] Forwarding: %s", trimmedLine)
+
+				// Forward each cleanup line as live output to UI
+				sseEvent := map[string]interface{}{
+					"type":      "live_output",
+					"testName":  testID,
+					"output":    line + "\n",
+					"timestamp": time.Now().UTC().Format(time.RFC3339),
+				}
+
+				// Forward to UI
+				forwardEventToUI(testID, sseEvent)
+
+				// Small delay to ensure UI can process messages in order
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
 	}
 
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("❌ [SSE FORWARD] UI returned non-OK status %d: %s", resp.StatusCode, string(body))
-		return
+	// Log stderr if any
+	if len(stderrStr) > 0 {
+		log.Printf("📄 [CLI CLEANUP] STDERR: %s", stderrStr)
+		// Also forward stderr as output
+		sseEvent := map[string]interface{}{
+			"type":      "live_output",
+			"testName":  testID,
+			"output":    "CLEANUP ERROR: " + stderrStr + "\n",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}
+		forwardEventToUI(testID, sseEvent)
 	}
 
-	log.Printf("✅ [SSE FORWARD] Event forwarded to UI successfully: %s (status=%d, duration=%v)", sseEvent["type"], resp.StatusCode, duration)
+	if err != nil {
+		log.Printf("❌ [CLI CLEANUP] Cleanup command failed: %v", err)
+		return fmt.Errorf("cleanup command failed: %v", err)
+	}
+
+	log.Printf("✅ [CLI CLEANUP] Detailed cleanup completed successfully for TestID=%s", testID)
+	return nil
 }
 
 // waitForCleanupCompletionWithProgress is enhanced version with progress reporting

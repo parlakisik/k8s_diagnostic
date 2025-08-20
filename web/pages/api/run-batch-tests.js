@@ -636,6 +636,10 @@ export default async function handler(req, res) {
   })}\n\n`);
   res.flush();
 
+  // CRITICAL FIX: Do NOT send fake cleanup messages in development mode
+  // The real cleanup output will be captured from the CLI process stdout
+  console.log(`[BATCH API] 📡 Development mode - cleanup will be captured from CLI process output`);
+
   // Build CLI command using the comma-separated list format
   const testListString = testList.join(',');
   const cliCommand = `./k8s_diagnostic test list: ${testListString} --verbose`;
@@ -790,22 +794,33 @@ export default async function handler(req, res) {
     console.log(`[BATCH API] 🚀 Starting HTTP API execution for ${testList.length} tests`);
     console.log(`[BATCH API] 🛡️ Health check passed - proceeding with test execution`);
     
-    // 🚨 CRITICAL FIX: Set up SSE event polling from /api/log-events to forward to BatchTestRunner
+    // 🚀 ENHANCED: Robust event polling with fallback mechanisms
     let eventPoller = null;
+    let volumeEventPoller = null;
     let lastEventCount = 0;
     let eventPollingActive = true;
+    let lastProcessedVolumeEvents = new Set();
     
-    const startEventPolling = () => {
-      console.log(`[BATCH API] 🔄 Starting SSE event polling from /api/log-events for testId: ${testId}`);
+    const startEnhancedEventPolling = () => {
+      console.log(`[BATCH API] 🚀 Starting enhanced event polling for testId: ${testId}`);
       
+      // Primary mechanism: HTTP event polling
       eventPoller = setInterval(async () => {
         if (!eventPollingActive) return;
         
         try {
-          const eventResponse = await fetch(`http://localhost:${process.env.PORT || 3000}/api/log-events?testId=${testId}`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-          });
+          const eventResponse = await Promise.race([
+            fetch(`http://localhost:${process.env.PORT || 3000}/api/log-events?testId=${testId}`, {
+              method: 'GET',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache'
+              }
+            }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Event polling timeout')), 5000)
+            )
+          ]);
           
           if (eventResponse.ok) {
             const eventData = await eventResponse.json();
@@ -820,7 +835,8 @@ export default async function handler(req, res) {
                   type: event.type || 'live_output',
                   testName: event.testId || event.testName,
                   message: event.message || event.line || '',
-                  timestamp: event.timestamp || new Date().toISOString()
+                  timestamp: event.timestamp || new Date().toISOString(),
+                  source: 'http_api'
                 };
                 
                 // Handle different event types
@@ -837,7 +853,7 @@ export default async function handler(req, res) {
                   forwardEvent.output = event.message + '\n';
                 }
                 
-                console.log(`[BATCH API] 📡 Forwarding SSE event: ${forwardEvent.type} - ${forwardEvent.message?.substring(0, 50)}...`);
+                console.log(`[BATCH API] 📡 Forwarding HTTP event: ${forwardEvent.type} - ${forwardEvent.message?.substring(0, 50)}...`);
                 
                 res.write(`data: ${JSON.stringify(forwardEvent)}\n\n`);
                 res.flush();
@@ -845,15 +861,105 @@ export default async function handler(req, res) {
               
               lastEventCount = eventData.events.length;
             }
+          } else {
+            console.log(`[BATCH API] ⚠️ HTTP event polling failed with status: ${eventResponse.status}`);
           }
         } catch (pollError) {
-          console.log(`[BATCH API] 🔍 Event polling error (non-critical): ${pollError.message}`);
+          console.log(`[BATCH API] ⚠️ HTTP event polling error: ${pollError.message}`);
         }
       }, 1000); // Poll every second
+      
+      // Fallback mechanism: Shared volume event polling
+      volumeEventPoller = setInterval(async () => {
+        if (!eventPollingActive) return;
+        
+        try {
+          await pollSharedVolumeEvents(testId, res);
+        } catch (volumeError) {
+          console.log(`[BATCH API] 🔍 Volume event polling error (non-critical): ${volumeError.message}`);
+        }
+      }, 2000); // Poll shared volume every 2 seconds
     };
     
-    // Start event polling
-    startEventPolling();
+    // Enhanced function to poll shared volume events as fallback
+    const pollSharedVolumeEvents = async (testId, responseStream) => {
+      const sharedPath = process.env.SHARED_VOLUME_PATH || '/app/shared/repository/test_results';
+      const eventsDir = path.join(sharedPath, 'events');
+      
+      try {
+        // Check if events directory exists
+        const fs = await import('fs');
+        if (!fs.existsSync(eventsDir)) {
+          return; // No events directory, skip
+        }
+        
+        // Read all event files for this testId
+        const eventFiles = fs.readdirSync(eventsDir)
+          .filter(file => file.startsWith(`${testId}-`) && file.endsWith('.json'))
+          .sort(); // Sort chronologically
+        
+        for (const eventFile of eventFiles) {
+          const eventPath = path.join(eventsDir, eventFile);
+          const eventId = `${testId}-${eventFile}`;
+          
+          // Skip already processed events
+          if (lastProcessedVolumeEvents.has(eventId)) {
+            continue;
+          }
+          
+          try {
+            const eventContent = fs.readFileSync(eventPath, 'utf8');
+            const eventData = JSON.parse(eventContent);
+            
+            // Mark as processed
+            lastProcessedVolumeEvents.add(eventId);
+            
+            // Transform and forward the event
+            let forwardEvent = {
+              type: eventData.type || 'live_output',
+              testName: eventData.testName || testId,
+              message: eventData.message || '',
+              timestamp: eventData.timestamp || new Date().toISOString(),
+              source: 'shared_volume'
+            };
+            
+            if (eventData.type === 'progress_update') {
+              forwardEvent.type = 'live_output';
+              forwardEvent.output = eventData.message + '\n';
+            } else if (eventData.type === 'test_start') {
+              forwardEvent.type = 'test_start';
+            } else if (eventData.type === 'test_progress') {
+              forwardEvent.type = 'live_output';
+              forwardEvent.output = eventData.message + '\n';
+            } else {
+              forwardEvent.type = 'live_output';
+              forwardEvent.output = eventData.message + '\n';
+            }
+            
+            console.log(`[BATCH API] 📂 Forwarding volume event: ${forwardEvent.type} - ${forwardEvent.message?.substring(0, 50)}...`);
+            
+            responseStream.write(`data: ${JSON.stringify(forwardEvent)}\n\n`);
+            responseStream.flush();
+            
+          } catch (parseError) {
+            console.log(`[BATCH API] ⚠️ Failed to parse volume event file ${eventFile}: ${parseError.message}`);
+          }
+        }
+        
+        // Clean up old processed event IDs to prevent memory leak
+        if (lastProcessedVolumeEvents.size > 1000) {
+          const eventArray = Array.from(lastProcessedVolumeEvents);
+          const keepEvents = eventArray.slice(-500); // Keep last 500
+          lastProcessedVolumeEvents = new Set(keepEvents);
+        }
+        
+      } catch (dirError) {
+        // Events directory doesn't exist or can't be read - this is normal
+      }
+    };
+    
+    // Start enhanced event polling
+    startEnhancedEventPolling();
     
     // Send batch start event
     res.write(`data: ${JSON.stringify({
@@ -884,7 +990,7 @@ export default async function handler(req, res) {
         updateTestProcessState(testId, testName, 'running', 'Sending HTTP request to CLI container...');
         
         const requestPayload = {
-          testId: testName,
+          testId: testId,
           cliCommand: `./k8s-diagnostic test list: ${testName} --verbose`,
           args: ['--verbose']
         };

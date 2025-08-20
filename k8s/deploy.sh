@@ -309,6 +309,108 @@ wait_for_deployment() {
     echo ""
 }
 
+# Cross-platform browser launch function
+open_browser() {
+    local url="$1"
+    echo -e "${GREEN}🌐 Opening browser: $url${NC}"
+    
+    if command -v open >/dev/null 2>&1; then
+        open "$url"  # macOS
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1  # Linux
+    elif command -v start >/dev/null 2>&1; then
+        start "$url" >/dev/null 2>&1  # Windows/WSL
+    else
+        echo -e "${YELLOW}⚠️  Could not auto-launch browser. Please manually open: $url${NC}"
+    fi
+}
+
+# Smart port forward setup with conflict resolution
+setup_port_forward() {
+    echo -e "${BLUE}🚀 Setting up port forwarding...${NC}"
+    
+    # Find available port starting from 3000
+    local available_port=3000
+    while lsof -i :$available_port >/dev/null 2>&1; do
+        echo -e "${YELLOW}⚠️  Port $available_port is in use, trying next port...${NC}"
+        ((available_port++))
+        if [[ $available_port -gt 3010 ]]; then
+            echo -e "${RED}❌ No available ports found in range 3000-3010${NC}"
+            return 1
+        fi
+    done
+    
+    echo -e "${GREEN}✅ Using port $available_port for UI access${NC}"
+    
+    # Start port forwarding in background
+    echo -e "${BLUE}Starting kubectl port-forward...${NC}"
+    kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui $available_port:3000 >/dev/null 2>&1 &
+    local port_forward_pid=$!
+    
+    # Store PID for cleanup
+    echo $port_forward_pid > /tmp/k8s-diagnostic-port-forward.pid
+    
+    # Wait for port-forward to establish
+    echo -e "${BLUE}Waiting for port-forward to establish...${NC}"
+    sleep 3
+    
+    # Verify port-forward is working
+    if ! lsof -i :$available_port >/dev/null 2>&1; then
+        echo -e "${RED}❌ Port-forward failed to establish${NC}"
+        kill $port_forward_pid 2>/dev/null
+        return 1
+    fi
+    
+    local access_url="http://localhost:$available_port"
+    echo -e "${GREEN}✅ Port-forward established successfully${NC}"
+    echo -e "${GREEN}📱 UI accessible at: $access_url${NC}"
+    
+    # Launch browser
+    open_browser "$access_url"
+    
+    echo ""
+    echo -e "${YELLOW}🔧 Port-forward is running in background (PID: $port_forward_pid)${NC}"
+    echo -e "${YELLOW}💡 To stop: kill $port_forward_pid${NC}"
+    echo -e "${YELLOW}💡 Or use: pkill -f 'kubectl port-forward.*k8s-diagnostic'${NC}"
+    
+    return 0
+}
+
+# Auto-start UI access with environment detection
+auto_start_access() {
+    echo ""
+    echo -e "${BLUE}🚀 Auto-starting UI access...${NC}"
+    
+    # Try Docker Desktop NodePort access first (most common development setup)
+    if kubectl config current-context 2>/dev/null | grep -q "docker-desktop"; then
+        echo -e "${BLUE}🔍 Detected Docker Desktop Kubernetes, trying NodePort access...${NC}"
+        
+        # Test if NodePort is accessible (port 32030 from service-ui-nodeport.yaml)
+        if timeout 3 bash -c "</dev/tcp/localhost/32030" 2>/dev/null; then
+            echo -e "${GREEN}✅ NodePort access available on port 32030${NC}"
+            local nodeport_url="http://localhost:32030"
+            echo -e "${GREEN}📱 UI accessible at: $nodeport_url${NC}"
+            open_browser "$nodeport_url"
+            
+            echo ""
+            echo -e "${BLUE}💡 Direct NodePort access established - no port-forward needed!${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}⚠️  NodePort not accessible (common with Docker Desktop networking)${NC}"
+        fi
+    fi
+    
+    # Fallback to port-forward for all other cases
+    echo -e "${BLUE}📡 Using port-forward method for reliable access...${NC}"
+    if setup_port_forward; then
+        return 0
+    else
+        echo -e "${RED}❌ Auto-start failed. Please use manual port-forward:${NC}"
+        echo -e "${BLUE}   kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui 3000:3000${NC}"
+        return 1
+    fi
+}
+
 # Display access information with environment-aware detection
 show_access_info() {
     echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
@@ -380,7 +482,47 @@ perform_health_check() {
 
 # Main deployment function
 main() {
-    # Set default image tag
+    # Parse command line arguments
+    local auto_launch=true
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-launch)
+                auto_launch=false
+                shift
+                ;;
+            --auto-launch)
+                auto_launch=true
+                shift
+                ;;
+            --tag)
+                IMAGE_TAG="$2"
+                shift 2
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --auto-launch    Auto-start UI access after deployment (default)"
+                echo "  --no-launch      Deploy only, show manual access instructions"
+                echo "  --tag TAG        Use specific image tag (default: latest)"
+                echo "  --help, -h       Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  $0                    # Deploy with auto-launch"
+                echo "  $0 --no-launch       # Deploy without auto-launch"
+                echo "  $0 --tag v3          # Deploy with specific image tag"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}❌ Unknown option: $1${NC}"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Set default image tag if not provided
     : "${IMAGE_TAG:=latest}"
     
     validate_prerequisites
@@ -400,6 +542,16 @@ main() {
     wait_for_deployment
     perform_health_check
     show_access_info
+    
+    # Auto-start UI access if enabled
+    if [[ "$auto_launch" == "true" ]]; then
+        auto_start_access
+    else
+        echo ""
+        echo -e "${BLUE}💡 Auto-launch disabled. Use the following commands for manual access:${NC}"
+        echo -e "${BLUE}  ./k8s/k8s-ui-access.sh --port-forward${NC}"
+        echo -e "${BLUE}  OR: kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui 3000:3000${NC}"
+    fi
     
     echo -e "${GREEN}🚀 k8s-diagnostic is now ready to use!${NC}"
 }

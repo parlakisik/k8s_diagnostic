@@ -17,47 +17,118 @@ spec:
     spec:
       serviceAccountName: k8s-diagnostic-cli-sa
       containers:
-        - name: ui
-          image: daryakut453/k8s-diagnostic-ui:fix-sse-polling-20250820-115347
-          imagePullPolicy: Always
-          env:
-            - name: NODE_ENV
-              value: "production"
-            - name: KUBERNETES_MODE
-              value: "true"
-            - name: CLI_SERVER_URL
-              value: "http://localhost:8080"
-            - name: SHARED_VOLUME_PATH
-              value: "/app/shared/repository/test_results"
-          ports:
-            - containerPort: 3000
-          volumeMounts:
-            - name: shared
-              mountPath: /app/shared/repository/test_results
-        - name: cli
-          image: daryakut453/k8s-diagnostic-cli:fix-sse-events-20250820-111859
-          imagePullPolicy: Always
-          command: ["/app/k8s-diagnostic"]
-          args: ["serve", "--port=8080"]
-          env:
-            - name: KUBERNETES_MODE
-              value: "true"
-            - name: CLI_PORT
-              value: "8080"
-            - name: SHARED_VOLUME_PATH
-              value: "/app/shared/repository/test_results"
-            - name: HTTP_LOG_URL
-              value: "http://localhost:3000"
-            - name: DOCKER_CONTAINER
-              value: "true"
-            - name: DISABLE_AUTO_REBUILD
-              value: "true"
-          ports:
-            - containerPort: 8080
-          volumeMounts:
-            - name: shared
-              mountPath: /app/shared/repository/test_results
-          # Container now uses CMD from Dockerfile: ["/app/k8s-diagnostic", "serve", "--port=8080"]
+      - name: ui
+        image: daryakut453/k8s-diagnostic-ui:v4
+        imagePullPolicy: Always
+        env:
+          - name: NODE_ENV
+            value: "production"
+          - name: KUBERNETES_MODE
+            value: "true"
+          - name: CLI_SERVER_URL
+            value: "http://localhost:8080"
+          - name: SHARED_VOLUME_PATH
+            value: "/app/shared/repository/test_results"
+          # 🚀 ENHANCED: Reliability configurations
+          - name: HTTP_TIMEOUT
+            value: "30000"
+          - name: MAX_RETRIES
+            value: "3"
+          - name: RETRY_DELAY
+            value: "1000"
+        ports:
+          - containerPort: 3000
+        volumeMounts:
+          - name: shared
+            mountPath: /app/shared/repository/test_results
+        # 🚀 ENHANCED: Improved health checks for better reliability
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 3
+        # 🚀 ENHANCED: Resource limits for stability
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      - name: cli
+        image: daryakut453/k8s-diagnostic-cli:v4
+        imagePullPolicy: Always
+        command: ["/app/k8s-diagnostic"]
+        args: ["serve", "--port=8080"]
+        env:
+          - name: KUBERNETES_MODE
+            value: "true"
+          - name: CLI_PORT
+            value: "8080"
+          - name: SHARED_VOLUME_PATH
+            value: "/app/shared/repository/test_results"
+          - name: HTTP_LOG_URL
+            value: "http://localhost:3000"
+          - name: DOCKER_CONTAINER
+            value: "true"
+          - name: DISABLE_AUTO_REBUILD
+            value: "true"
+          # 🚀 ENHANCED: HTTP server reliability configurations
+          - name: HTTP_READ_TIMEOUT
+            value: "30s"
+          - name: HTTP_WRITE_TIMEOUT
+            value: "30s"
+          - name: HTTP_IDLE_TIMEOUT
+            value: "120s"
+        ports:
+          - containerPort: 8080
+        volumeMounts:
+          - name: shared
+            mountPath: /app/shared/repository/test_results
+        # 🚀 ENHANCED: Robust health checks with proper startup sequence
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 6
+        # 🚀 ENHANCED: Resource limits for stability
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
       volumes:
         - name: shared
           persistentVolumeClaim:

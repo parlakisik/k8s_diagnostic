@@ -60,14 +60,15 @@ func NewLoggerWithLevel(consoleOutput bool, level LogLevel) (*Logger, error) {
 
 // NewLoggerWithSharedTimestamp creates a logger with a shared timestamp for consistent file naming
 func NewLoggerWithSharedTimestamp(sharedTime *SharedTimestamp, consoleOutput bool, level LogLevel) (*Logger, error) {
-	// Use shared volume path if available
-	logsDir := getSharedPath("test_results/logs")
+	// CRITICAL FIX: Use consistent path logic with timestamp.go getBasePath()
+	// Get the log file path from timestamp (which uses getBasePath() correctly)
+	fullPath := sharedTime.GetLogFilePath()
+
+	// Create the directory for the log file
+	logsDir := filepath.Dir(fullPath)
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create logs directory: %v", err)
 	}
-
-	// Use shared timestamp to ensure consistent naming with JSON files
-	fullPath := sharedTime.GetLogFilePath()
 
 	// Open log file for writing
 	logFile, err := os.Create(fullPath)
@@ -246,7 +247,18 @@ func (l *Logger) CaptureCommandOutput(cmdOutput CommandOutput) {
 // getSharedPath returns the shared volume path if available, otherwise returns the original path
 func getSharedPath(relativePath string) string {
 	if sharedDir := os.Getenv("SHARED_VOLUME_PATH"); sharedDir != "" {
-		return filepath.Join(sharedDir, "repository", relativePath)
+		// CRITICAL FIX: Handle both production and development environments
+		// Production: SHARED_VOLUME_PATH="/app/shared/repository/test_results" (full path)
+		// Development: SHARED_VOLUME_PATH="/some/path" (needs repository added)
+
+		// If the shared path already contains "test_results", it's the full production path
+		if strings.Contains(sharedDir, "test_results") {
+			// Production: Use the path as-is and append relativePath directly
+			return filepath.Join(sharedDir, relativePath)
+		} else {
+			// Development: Add "repository" as before
+			return filepath.Join(sharedDir, "repository", relativePath)
+		}
 	}
-	return relativePath // Local development
+	return relativePath // Local development fallback
 }

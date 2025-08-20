@@ -10,7 +10,7 @@ metadata:
   name: k8s-diagnostic-cli-role
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "endpoints", "namespaces", "nodes", "events", "configmaps"]
+    resources: ["pods", "pods/log", "pods/exec", "services", "endpoints", "namespaces", "nodes", "events", "configmaps"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "statefulsets", "replicasets"]
@@ -34,4 +34,3 @@ subjects:
   - kind: ServiceAccount
     name: k8s-diagnostic-cli-sa
     namespace: k8s-diagnostic
-
