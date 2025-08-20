@@ -212,7 +212,26 @@ async function fetchUserMessagesFromHTTP(testId, testList) {
 
 // 🛡️ ENHANCED: Protected test result extraction with state validation
 async function extractTestResultsFromJSON(projectRoot, testList, testId) {
-  const resultsDir = path.join(projectRoot, 'test_results');
+  // 🛡️ FIXED: Use correct path for Kubernetes deployment with shared volume
+  let resultsDir;
+  
+  // Check if we're running in Kubernetes mode (same logic as CLI container)
+  const kubernetesMode = process.env.KUBERNETES_MODE === 'true';
+  const sharedVolumePath = process.env.SHARED_VOLUME_PATH;
+  
+  if (kubernetesMode && sharedVolumePath) {
+    // In Kubernetes, use the shared volume path directly
+    resultsDir = sharedVolumePath;
+    console.log(`[BATCH API] Using Kubernetes shared volume path: ${resultsDir}`);
+  } else if (sharedVolumePath) {
+    // Use configured shared volume path
+    resultsDir = sharedVolumePath;
+    console.log(`[BATCH API] Using configured shared volume path: ${resultsDir}`);
+  } else {
+    // Fallback to project root for local development
+    resultsDir = path.join(projectRoot, 'test_results');
+    console.log(`[BATCH API] Using local development path: ${resultsDir}`);
+  }
   
   try {
     // 🛡️ Validate input parameters
@@ -629,7 +648,435 @@ export default async function handler(req, res) {
   console.log(`[BATCH API] Project root: ${projectRoot}`);
   console.log(`[BATCH API] Current working directory: ${process.cwd()}`);
   
-  // Environment detection
+  // 🛡️ KUBERNETES MODE: Check FIRST before any other logic - ENHANCED DEBUGGING
+  const kubernetesMode = process.env.KUBERNETES_MODE === 'true';
+  console.log(`[BATCH API] 🔍 ENHANCED DEBUG: Environment variable analysis:`);
+  console.log(`[BATCH API] NODE_ENV: "${process.env.NODE_ENV}" (${typeof process.env.NODE_ENV})`);
+  console.log(`[BATCH API] KUBERNETES_MODE: "${process.env.KUBERNETES_MODE}" (${typeof process.env.KUBERNETES_MODE})`);
+  console.log(`[BATCH API] USE_DOCKER: "${process.env.USE_DOCKER}" (${typeof process.env.USE_DOCKER})`);
+  console.log(`[BATCH API] SHARED_VOLUME_PATH: "${process.env.SHARED_VOLUME_PATH}"`);
+  console.log(`[BATCH API] CLI_SERVER_URL: "${process.env.CLI_SERVER_URL}"`);
+  console.log(`[BATCH API] 🎯 KUBERNETES MODE DETECTED: ${kubernetesMode}`);
+  console.log(`[BATCH API] 🔍 DEBUG: Boolean evaluations:`);
+  console.log(`[BATCH API]   process.env.KUBERNETES_MODE === 'true': ${process.env.KUBERNETES_MODE === 'true'}`);
+  console.log(`[BATCH API]   process.env.KUBERNETES_MODE == 'true': ${process.env.KUBERNETES_MODE == 'true'}`);
+  console.log(`[BATCH API]   Boolean(process.env.KUBERNETES_MODE): ${Boolean(process.env.KUBERNETES_MODE)}`);
+  console.log(`[BATCH API] 🔍 DEBUG: All environment variables containing 'KUBERNETES', 'CLI', 'DOCKER', 'NODE_ENV':`);
+  Object.keys(process.env).filter(key => 
+    key.includes('KUBERNETES') || key.includes('CLI') || key.includes('DOCKER') || key.includes('NODE_ENV')
+  ).forEach(key => {
+    console.log(`[BATCH API]   ${key}: "${process.env[key]}" (${typeof process.env[key]})`);
+  });
+  
+  // 🚨 CRITICAL CHECK: Validate that we're actually detecting Kubernetes mode correctly
+  if (!kubernetesMode) {
+    console.log(`[BATCH API] ⚠️ WARNING: Not in Kubernetes mode - will use Docker/local execution`);
+    console.log(`[BATCH API] ⚠️ If this is a Kubernetes deployment, check environment variables!`);
+  } else {
+    console.log(`[BATCH API] ✅ CONFIRMED: Running in Kubernetes mode - will use HTTP API`);
+  }
+  
+  if (kubernetesMode) {
+    console.log(`[BATCH API] 🚀 KUBERNETES MODE: Using HTTP API to communicate with CLI container`);
+    console.log(`[BATCH API] 🔍 DEBUG: CLI container should be available at http://localhost:8080`);
+    console.log(`[BATCH API] 📋 DEBUG: Test list to execute:`, testList);
+    
+    // 🚨 CRITICAL: Mandatory pre-execution validation
+    console.log(`[BATCH API] 🛡️ MANDATORY PRE-EXECUTION VALIDATION:`);
+    console.log(`[BATCH API]   ✅ Kubernetes mode confirmed: ${kubernetesMode}`);
+    console.log(`[BATCH API]   📋 Tests to execute: ${testList.length} tests`);
+    console.log(`[BATCH API]   🎯 Expected CLI endpoint: http://localhost:8080/api/execute-test`);
+    
+    // ENHANCED: Comprehensive CLI container health check with mandatory validation
+    console.log(`[BATCH API] 🏥 MANDATORY: Testing CLI container health before test execution...`);
+    console.log(`[BATCH API] 🔍 DEBUG: Environment variables:`);
+    console.log(`[BATCH API]   NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`[BATCH API]   KUBERNETES_MODE: ${process.env.KUBERNETES_MODE}`);
+    console.log(`[BATCH API]   CLI_SERVER_URL: ${process.env.CLI_SERVER_URL}`);
+    
+    const cliUrl = process.env.CLI_SERVER_URL || 'http://localhost:8080';
+    console.log(`[BATCH API] 🎯 Using CLI URL: ${cliUrl}`);
+    
+    let healthCheckPassed = false;
+    
+    try {
+      console.log(`[BATCH API] 📡 MANDATORY HEALTH CHECK: Attempting request to: ${cliUrl}/api/health`);
+      
+      const healthResponse = await Promise.race([
+        fetch(`${cliUrl}/api/health`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'k8s-diagnostic-ui-health-check'
+          }
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout after 10s')), 10000)
+        )
+      ]);
+      
+      console.log(`[BATCH API] 📥 Health response received:`, {
+        status: healthResponse.status,
+        statusText: healthResponse.statusText,
+        ok: healthResponse.ok,
+        headers: Object.fromEntries(healthResponse.headers.entries())
+      });
+      
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        console.log(`[BATCH API] ✅ CLI container health check PASSED:`, healthData);
+        healthCheckPassed = true;
+      } else {
+        console.log(`[BATCH API] ❌ CLI container health check FAILED with status ${healthResponse.status}`);
+        const healthText = await healthResponse.text();
+        console.log(`[BATCH API] 📄 Health response text:`, healthText);
+        healthCheckPassed = false;
+      }
+    } catch (healthError) {
+      console.error(`[BATCH API] ❌ CLI container health check FAILED:`, {
+        error: healthError.message,
+        name: healthError.name,
+        stack: healthError.stack,
+        cause: healthError.cause
+      });
+      console.log(`[BATCH API] 🔧 This indicates CLI container communication failure`);
+      console.log(`[BATCH API] 🔍 Possible causes:`);
+      console.log(`[BATCH API]   - CLI container not running`);
+      console.log(`[BATCH API]   - Port 8080 not accessible`);
+      console.log(`[BATCH API]   - Network policy blocking localhost communication`);
+      console.log(`[BATCH API]   - Container networking misconfiguration`);
+      healthCheckPassed = false;
+    }
+    
+    // 🚨 CRITICAL: Block execution if health check fails
+    if (!healthCheckPassed) {
+      console.error(`[BATCH API] 🚨 BLOCKING EXECUTION: CLI container health check failed!`);
+      console.error(`[BATCH API] 🚨 This would result in fake positive results - ABORTING`);
+      
+      // Send error to all tests
+      for (const testName of testList) {
+        res.write(`data: ${JSON.stringify({
+          type: 'test_complete',
+          testName: testName,
+          success: false,
+          summary: `CLI container unreachable - health check failed`,
+          duration: null,
+          command: `HTTP API: ${testName}`,
+          timestamp: new Date().toISOString(),
+          error: 'CLI_CONTAINER_UNREACHABLE'
+        })}\n\n`);
+        res.flush();
+      }
+      
+      res.write(`data: ${JSON.stringify({
+        type: 'batch_complete',
+        success: false,
+        exitCode: 1,
+        overallProgress: 100,
+        message: 'Batch aborted - CLI container unreachable',
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      
+      runningTests.delete(testId);
+      res.end();
+      return;
+    }
+    
+    // Execute tests via HTTP API calls to CLI container - ENHANCED WITH VALIDATION
+    let httpRequestsMade = 0;
+    let httpRequestsSuccessful = 0;
+    let httpRequestsFailed = 0;
+    
+    console.log(`[BATCH API] 🚀 Starting HTTP API execution for ${testList.length} tests`);
+    console.log(`[BATCH API] 🛡️ Health check passed - proceeding with test execution`);
+    
+    // 🚨 CRITICAL FIX: Set up SSE event polling from /api/log-events to forward to BatchTestRunner
+    let eventPoller = null;
+    let lastEventCount = 0;
+    let eventPollingActive = true;
+    
+    const startEventPolling = () => {
+      console.log(`[BATCH API] 🔄 Starting SSE event polling from /api/log-events for testId: ${testId}`);
+      
+      eventPoller = setInterval(async () => {
+        if (!eventPollingActive) return;
+        
+        try {
+          const eventResponse = await fetch(`http://localhost:${process.env.PORT || 3000}/api/log-events?testId=${testId}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+          });
+          
+          if (eventResponse.ok) {
+            const eventData = await eventResponse.json();
+            
+            if (eventData.events && eventData.events.length > lastEventCount) {
+              // Forward new events to BatchTestRunner via SSE
+              const newEvents = eventData.events.slice(lastEventCount);
+              
+              for (const event of newEvents) {
+                // Transform CLI events to BatchTestRunner expected format
+                let forwardEvent = {
+                  type: event.type || 'live_output',
+                  testName: event.testId || event.testName,
+                  message: event.message || event.line || '',
+                  timestamp: event.timestamp || new Date().toISOString()
+                };
+                
+                // Handle different event types
+                if (event.type === 'progress_update') {
+                  forwardEvent.type = 'live_output';
+                  forwardEvent.output = event.message + '\n';
+                } else if (event.type === 'test_start') {
+                  forwardEvent.type = 'test_start';
+                } else if (event.type === 'test_progress') {
+                  forwardEvent.type = 'live_output';
+                  forwardEvent.output = event.message + '\n';
+                } else {
+                  forwardEvent.type = 'live_output';
+                  forwardEvent.output = event.message + '\n';
+                }
+                
+                console.log(`[BATCH API] 📡 Forwarding SSE event: ${forwardEvent.type} - ${forwardEvent.message?.substring(0, 50)}...`);
+                
+                res.write(`data: ${JSON.stringify(forwardEvent)}\n\n`);
+                res.flush();
+              }
+              
+              lastEventCount = eventData.events.length;
+            }
+          }
+        } catch (pollError) {
+          console.log(`[BATCH API] 🔍 Event polling error (non-critical): ${pollError.message}`);
+        }
+      }, 1000); // Poll every second
+    };
+    
+    // Start event polling
+    startEventPolling();
+    
+    // Send batch start event
+    res.write(`data: ${JSON.stringify({
+      type: 'batch_start',
+      message: `Starting batch execution of ${testList.length} tests via HTTP API`,
+      testId: testId,
+      testCount: testList.length,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+    res.flush();
+    
+    for (let i = 0; i < testList.length; i++) {
+      const testName = testList[i];
+      console.log(`[BATCH API] 📡 [${httpRequestsMade + 1}/${testList.length}] Executing test via HTTP API: ${testName}`);
+      
+      // Send test start event
+      res.write(`data: ${JSON.stringify({
+        type: 'test_start',
+        testName: testName,
+        message: `Starting test: ${testName}`,
+        testIndex: i,
+        totalTests: testList.length,
+        timestamp: new Date().toISOString()
+      })}\n\n`);
+      res.flush();
+      
+      try {
+        updateTestProcessState(testId, testName, 'running', 'Sending HTTP request to CLI container...');
+        
+        const requestPayload = {
+          testId: testName,
+          cliCommand: `./k8s-diagnostic test list: ${testName} --verbose`,
+          args: ['--verbose']
+        };
+        
+        console.log(`[BATCH API] 📤 SENDING HTTP REQUEST #${httpRequestsMade + 1}:`, {
+          url: 'http://localhost:8080/api/execute-test',
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          payload: requestPayload,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Send progress update
+        res.write(`data: ${JSON.stringify({
+          type: 'test_progress',
+          testName: testName,
+          message: `Executing via HTTP API...`,
+          progress: Math.round(((i) / testList.length) * 100),
+          timestamp: new Date().toISOString()
+        })}\n\n`);
+        res.flush();
+        
+        // 🔍 CRITICAL: Log before making the actual HTTP request
+        console.log(`[BATCH API] 🌐 ABOUT TO MAKE HTTP REQUEST #${httpRequestsMade + 1} - CLI container should receive this!`);
+        httpRequestsMade++;
+        
+        // Send test execution request to CLI container with timeout
+        const httpResponse = await Promise.race([
+          fetch('http://localhost:8080/api/execute-test', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestPayload)
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('HTTP request timeout after 120s')), 120000)
+          )
+        ]);
+        
+        console.log(`[BATCH API] 📥 HTTP RESPONSE #${httpRequestsMade} RECEIVED for ${testName}:`, {
+          status: httpResponse.status,
+          statusText: httpResponse.statusText,
+          ok: httpResponse.ok,
+          headers: Object.fromEntries(Array.from(httpResponse.headers.entries())),
+          timestamp: new Date().toISOString()
+        });
+        
+        if (!httpResponse.ok) {
+          const errorText = await httpResponse.text();
+          httpRequestsFailed++;
+          console.error(`[BATCH API] ❌ HTTP ERROR RESPONSE #${httpRequestsMade} for ${testName}:`, {
+            status: httpResponse.status,
+            statusText: httpResponse.statusText,
+            errorText: errorText,
+            testName: testName
+          });
+          throw new Error(`HTTP ${httpResponse.status}: ${errorText}`);
+        }
+        
+        const result = await httpResponse.json();
+        httpRequestsSuccessful++;
+        
+        // 🔍 ENHANCED: Validate the response structure and detect fake results
+        console.log(`[BATCH API] ✅ HTTP API RESPONSE #${httpRequestsMade} for ${testName}:`, {
+          success: result.success,
+          testId: result.testId,
+          message: result.message,
+          hasData: !!result.data,
+          messageLength: result.message ? result.message.length : 0,
+          timestamp: new Date().toISOString()
+        });
+        
+        // 🚨 CRITICAL: VALIDATE RESULT AUTHENTICITY - BLOCK FAKE RESULTS
+        let isValidResult = true;
+        let validationWarnings = [];
+        
+        if (result.message && result.message.includes('executed via HTTP API')) {
+          validationWarnings.push('Response contains generic HTTP API message - BLOCKED as fake');
+          isValidResult = false;
+        }
+        
+        if (result.success && (!result.message || result.message.length < 10)) {
+          validationWarnings.push('Success response has suspiciously short message - BLOCKED as fake');
+          isValidResult = false;
+        }
+        
+        // 🚨 BLOCK OBVIOUSLY FAKE RESULTS
+        if (!isValidResult) {
+          console.error(`[BATCH API] 🚨 BLOCKING FAKE RESULT for ${testName}:`, validationWarnings);
+          console.error(`[BATCH API] 🚨 This appears to be a false positive - treating as FAILED`);
+          
+          updateTestProcessState(testId, testName, 'failed', `Blocked fake result: ${validationWarnings.join(', ')}`);
+          
+          res.write(`data: ${JSON.stringify({
+            type: 'test_complete',
+            testName: testName,
+            success: false,
+            summary: `BLOCKED - Fake result detected: ${validationWarnings.join(', ')}`,
+            duration: null,
+            command: `HTTP API: ${testName}`,
+            timestamp: new Date().toISOString(),
+            validationWarnings: validationWarnings,
+            blocked: true
+          })}\n\n`);
+          res.flush();
+          continue;
+        }
+        
+        updateTestProcessState(testId, testName, result.success ? 'completed' : 'failed', 
+          result.success ? 'Test completed via HTTP API' : `Test failed: ${result.message}`);
+        
+        // Send test complete event to frontend with validation info
+        res.write(`data: ${JSON.stringify({
+          type: 'test_complete',
+          testName: testName,
+          success: result.success,
+          summary: result.success ? 
+            `PASSED - ${result.message}` : 
+            `FAILED - ${result.message}`,
+          duration: null,
+          command: `HTTP API: ${testName}`,
+          timestamp: new Date().toISOString(),
+          validated: true
+        })}\n\n`);
+        res.flush();
+        
+      } catch (error) {
+        httpRequestsFailed++;
+        console.error(`[BATCH API] ❌ HTTP API ERROR #${httpRequestsMade} for ${testName}:`, {
+          error: error.message,
+          stack: error.stack,
+          testName: testName,
+          requestNumber: httpRequestsMade,
+          timestamp: new Date().toISOString()
+        });
+        
+        updateTestProcessState(testId, testName, 'failed', `HTTP API error: ${error.message}`);
+        
+        res.write(`data: ${JSON.stringify({
+          type: 'test_complete',
+          testName: testName,
+          success: false,
+          summary: `HTTP API Error: ${error.message}`,
+          duration: null,
+          command: `HTTP API: ${testName}`,
+          timestamp: new Date().toISOString()
+        })}\n\n`);
+        res.flush();
+      }
+    }
+    
+    // 🔍 SUMMARY: Log HTTP request statistics
+    console.log(`[BATCH API] 📊 HTTP REQUEST SUMMARY:`, {
+      totalRequests: httpRequestsMade,
+      successful: httpRequestsSuccessful,
+      failed: httpRequestsFailed,
+      successRate: httpRequestsMade > 0 ? ((httpRequestsSuccessful / httpRequestsMade) * 100).toFixed(1) + '%' : '0%'
+    });
+    
+    if (httpRequestsMade === 0) {
+      console.error(`[BATCH API] 🚨 CRITICAL: No HTTP requests were made despite being in Kubernetes mode!`);
+    } else if (httpRequestsFailed === httpRequestsMade) {
+      console.error(`[BATCH API] 🚨 CRITICAL: All HTTP requests failed - CLI container communication broken!`);
+    } else {
+      console.log(`[BATCH API] ✅ HTTP request execution completed successfully`);
+    }
+    
+    // 🧹 CRITICAL: Stop event polling and clean up
+    eventPollingActive = false;
+    if (eventPoller) {
+      clearInterval(eventPoller);
+      console.log(`[BATCH API] 🛑 Stopped SSE event polling for testId: ${testId}`);
+    }
+    
+    // Send batch completion
+    res.write(`data: ${JSON.stringify({
+      type: 'batch_complete',
+      success: httpRequestsSuccessful > 0, // Based on actual HTTP success
+      exitCode: httpRequestsSuccessful > 0 ? 0 : 1,
+      overallProgress: 100,
+      message: `Kubernetes HTTP API execution completed: ${httpRequestsSuccessful}/${httpRequestsMade} requests successful`,
+      timestamp: new Date().toISOString()
+    })}\n\n`);
+    
+    // Clean up and end
+    runningTests.delete(testId);
+    res.end();
+    return;
+  }
+
+  // Environment detection for non-Kubernetes deployments
   const isDevelopment = process.env.NODE_ENV !== 'production';
   const useDocker = process.env.USE_DOCKER === 'true' || !isDevelopment;
   

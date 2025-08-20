@@ -3,6 +3,9 @@ import fs from 'fs';
 import path from 'path';
 // Removed JSONL monitoring - using HTTP API events instead
 
+// Import ContainerAPIService for Kubernetes communication
+const { ContainerAPIService, detectKubernetesEnvironment } = require('../../services/ContainerAPIService');
+
 // Global state to track running tests
 let runningTest = null;
 let testQueue = [];
@@ -82,8 +85,30 @@ export default function handler(req, res) {
   const projectRoot = getProjectRoot();
   
   
-  // Check if running in Docker environment
-  const isDockerEnvironment = process.env.SHARED_VOLUME_PATH !== undefined;
+  // Detect execution environment
+  const isKubernetesEnvironment = detectKubernetesEnvironment();
+  const isDockerEnvironment = process.env.SHARED_VOLUME_PATH !== undefined && !isKubernetesEnvironment;
+  
+  console.log(`[API] Environment detection: Kubernetes=${isKubernetesEnvironment}, Docker=${isDockerEnvironment}`);
+  
+  // Function to clear running test state
+  const clearRunningTest = () => {
+    if (runningTest && runningTest.testId === testId) {
+      runningTest = null;
+    }
+  };
+
+  // Handle Kubernetes environment differently
+  if (isKubernetesEnvironment) {
+    console.log(`[API] KUBERNETES: Using HTTP communication to CLI container for test ${testId}`);
+    
+    // Initialize container API service
+    const containerAPI = new ContainerAPIService();
+    
+    // Send test execution request to CLI container
+    handleKubernetesTestExecution(containerAPI, testId, cliCommand, args, res, clearRunningTest);
+    return; // Exit early for Kubernetes handling
+  }
   
   let childProcess;
   if (isDockerEnvironment) {
@@ -109,13 +134,6 @@ export default function handler(req, res) {
       env: { ...process.env }
     });
   }
-
-  // Function to clear running test state
-  const clearRunningTest = () => {
-    if (runningTest && runningTest.testId === testId) {
-      runningTest = null;
-    }
-  };
 
   let httpPollingInterval = null;
   let lastEventTime = new Date().toISOString();
@@ -386,6 +404,193 @@ export default function handler(req, res) {
       httpPollingInterval = null;
     }
   });
+}
+
+// Handle Kubernetes test execution via HTTP communication to CLI container
+async function handleKubernetesTestExecution(containerAPI, testId, cliCommand, args, res, clearRunningTest) {
+  console.log(`[API] KUBERNETES: Starting test execution for ${testId}`);
+  
+  try {
+    // Check if CLI container is ready
+    const isReady = await containerAPI.waitForCLIReady(5, 1000);
+    if (!isReady) {
+      throw new Error('CLI container is not ready');
+    }
+
+    // Send test execution request to CLI container
+    const response = await containerAPI.executeTest(testId, cliCommand, args);
+    
+    if (!response) {
+      throw new Error('No response from CLI container');
+    }
+
+    const result = await response.json();
+    
+    // Send immediate response about test initiation
+    res.write(`data: ${JSON.stringify({
+      type: 'kubernetes_start',
+      message: 'Test execution started in CLI container',
+      timestamp: new Date().toISOString(),
+      testId: testId,
+      success: result.success
+    })}\n\n`);
+
+    // Start polling for HTTP events from CLI container
+    let httpPollingInterval = null;
+    let lastEventTime = new Date().toISOString();
+
+    const pollHttpEvents = async () => {
+      try {
+        const response = await fetch(`http://localhost:3000/api/log-events?testId=${testId}&since=${lastEventTime}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          if (data.events && data.events.length > 0) {
+            data.events.forEach(event => {
+              try {
+                // Transform HTTP API event for frontend
+                const frontendEvent = transformHttpEvent(event);
+                res.write(`data: ${JSON.stringify(frontendEvent)}\n\n`);
+                
+                // Update last event time
+                if (event.timestamp) {
+                  lastEventTime = event.timestamp;
+                }
+              } catch (error) {
+                console.error('Error transforming HTTP event:', error);
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error polling HTTP events:', error);
+      }
+    };
+
+    // Transform HTTP API event for frontend (duplicate function for Kubernetes path)
+    const transformHttpEvent = (event) => {
+      // Handle user-friendly messages from HTTP API
+      if (event.type === 'user_step' && event.userMessage) {
+        return {
+          type: mapPhaseToType(event.userMessage.phase),
+          timestamp: event.timestamp || new Date().toISOString(),
+          title: event.userMessage.title,
+          description: event.userMessage.description,
+          context: event.userMessage.context,
+          status: event.userMessage.status,
+          hints: event.userMessage.hints || [],
+          isUserFriendly: true,
+          technicalDetails: event.technicalDetails,
+          showTechnicalDetails: false
+        };
+      }
+      
+      // Handle regular log events
+      return {
+        type: event.type || 'info',
+        timestamp: event.timestamp || new Date().toISOString(),
+        message: event.message || '',
+        level: event.level || 'INFO',
+        context: event.context,
+        data: event.data || {},
+        testId: event.testId
+      };
+    };
+
+    // Map user message phases to frontend event types (duplicate for Kubernetes path)
+    const mapPhaseToType = (phase) => {
+      switch (phase) {
+        case 'environment': return 'environment_check';
+        case 'setup': return 'resource_creation';
+        case 'execution': return 'connectivity_test';
+        default: return 'info';
+      }
+    };
+
+    // Start HTTP API polling every 500ms
+    httpPollingInterval = setInterval(pollHttpEvents, 500);
+
+    // Handle client disconnect for Kubernetes execution
+    req.on('close', () => {
+      console.log(`[API] KUBERNETES DISCONNECT: Client disconnected for test ${testId}`);
+      clearRunningTest();
+      
+      if (httpPollingInterval) {
+        clearInterval(httpPollingInterval);
+        httpPollingInterval = null;
+      }
+    });
+
+    // Simulate completion after some time (this should be replaced with actual completion detection)
+    // In a real implementation, you'd detect completion through the CLI container's response or polling
+    setTimeout(async () => {
+      console.log(`[API] KUBERNETES: Test ${testId} completion check`);
+      
+      clearRunningTest();
+      
+      if (httpPollingInterval) {
+        clearInterval(httpPollingInterval);
+        httpPollingInterval = null;
+      }
+
+      // Send completion event
+      res.write(`data: ${JSON.stringify({
+        type: 'complete',
+        exitCode: result.success ? 0 : 1,
+        success: result.success,
+        timestamp: new Date().toISOString(),
+        message: result.success ? 'Test completed successfully' : 'Test completed with errors'
+      })}\n\n`);
+
+      // Try to find and send the latest JSON results file
+      const getProjectRoot = () => {
+        return process.env.SHARED_VOLUME_PATH 
+          ? path.join(process.env.SHARED_VOLUME_PATH, 'repository')
+          : path.resolve(process.cwd(), '..');
+      };
+
+      const projectRoot = getProjectRoot();
+      
+      try {
+        const resultsFile = await findLatestResultsFile(projectRoot);
+        if (resultsFile) {
+          const resultsPath = path.join(projectRoot, 'test_results', resultsFile);
+          const data = await fs.promises.readFile(resultsPath, 'utf8');
+          const results = JSON.parse(data);
+          
+          console.log(`[API] KUBERNETES RESULTS: Sending test results for ${testId} - Success: ${results.success_rate}%`);
+          res.write(`data: ${JSON.stringify({
+            type: 'results',
+            data: results,
+            timestamp: new Date().toISOString()
+          })}\n\n`);
+        } else {
+          console.log(`[API] KUBERNETES WARNING: No results file found for test ${testId}`);
+        }
+      } catch (err) {
+        console.error('Error reading Kubernetes results file:', err);
+      }
+      
+      res.end();
+    }, 30000); // 30 second timeout for demonstration
+
+  } catch (error) {
+    console.error(`[API] KUBERNETES ERROR: Test ${testId} failed:`, error);
+    
+    clearRunningTest();
+    
+    const errorEntry = {
+      type: 'error',
+      message: `Kubernetes test execution error: ${error.message}`,
+      timestamp: new Date().toISOString()
+    };
+    res.write(`data: ${JSON.stringify(errorEntry)}\n\n`);
+    res.end();
+  }
 }
 
 // Helper function to find the latest results file

@@ -18,33 +18,47 @@ spec:
       serviceAccountName: k8s-diagnostic-cli-sa
       containers:
         - name: ui
-          image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-ui:${IMAGE_TAG}
-          imagePullPolicy: IfNotPresent
+          image: daryakut453/k8s-diagnostic-ui:fix-sse-polling-20250820-115347
+          imagePullPolicy: Always
           env:
             - name: NODE_ENV
               value: "production"
+            - name: KUBERNETES_MODE
+              value: "true"
+            - name: CLI_SERVER_URL
+              value: "http://localhost:8080"
             - name: SHARED_VOLUME_PATH
-              value: "/app/shared"
+              value: "/app/shared/repository/test_results"
           ports:
             - containerPort: 3000
           volumeMounts:
             - name: shared
               mountPath: /app/shared/repository/test_results
         - name: cli
-          image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-cli:${IMAGE_TAG}
-          imagePullPolicy: IfNotPresent
+          image: daryakut453/k8s-diagnostic-cli:fix-sse-events-20250820-111859
+          imagePullPolicy: Always
+          command: ["/app/k8s-diagnostic"]
+          args: ["serve", "--port=8080"]
           env:
+            - name: KUBERNETES_MODE
+              value: "true"
+            - name: CLI_PORT
+              value: "8080"
             - name: SHARED_VOLUME_PATH
-              value: "/app/shared"
+              value: "/app/shared/repository/test_results"
             - name: HTTP_LOG_URL
-              value: "http://k8s-diagnostic-ui:3000"
+              value: "http://localhost:3000"
+            - name: DOCKER_CONTAINER
+              value: "true"
+            - name: DISABLE_AUTO_REBUILD
+              value: "true"
+          ports:
+            - containerPort: 8080
           volumeMounts:
             - name: shared
               mountPath: /app/shared/repository/test_results
-          command: ["/bin/sh", "-c"]
-          args: ["sleep infinity"]
+          # Container now uses CMD from Dockerfile: ["/app/k8s-diagnostic", "serve", "--port=8080"]
       volumes:
         - name: shared
           persistentVolumeClaim:
             claimName: k8s-diagnostic-results-pvc
-

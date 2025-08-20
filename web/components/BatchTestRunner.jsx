@@ -452,12 +452,14 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
     // 🧹 FRONTEND CLEANUP: Clear server-side event storage before starting
     try {
+      console.log('[BatchTestRunner] 🧹 DEBUG: Clearing server-side event storage...');
       await fetch('/api/log-events', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
+      console.log('[BatchTestRunner] ✅ DEBUG: Server-side event storage cleared');
     } catch (cleanupError) {
-      // Silent cleanup error handling
+      console.log('[BatchTestRunner] ⚠️ DEBUG: Failed to clear server event storage:', cleanupError);
     }
 
     // Initialize test states for selected tests only
@@ -470,7 +472,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     setTestResults(initialResults);
     setTestOutputs(initialOutputs);
 
+    console.log('[BatchTestRunner] 🎯 DEBUG: About to make HTTP request to /api/run-batch-tests');
+    console.log('[BatchTestRunner] 📊 DEBUG: Request payload:', { testList: selectedTestsList, testId: newTestId });
+
     try {
+      const requestStart = Date.now();
+      console.log('[BatchTestRunner] 🚀 DEBUG: Making HTTP request to CLI container at', new Date().toISOString());
+      
       const response = await fetch('/api/run-batch-tests', {
         method: 'POST',
         headers: {
@@ -482,23 +490,36 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         })
       });
 
+      const requestDuration = Date.now() - requestStart;
+      console.log('[BatchTestRunner] 📡 DEBUG: HTTP response received after', requestDuration, 'ms');
+      console.log('[BatchTestRunner] 📊 DEBUG: Response status:', response.status, response.statusText);
+      console.log('[BatchTestRunner] 📊 DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
+        console.log('[BatchTestRunner] ❌ DEBUG: HTTP response not OK, attempting to parse error...');
         const errorData = await response.json().catch(() => ({}));
+        console.log('[BatchTestRunner] ❌ DEBUG: Error data:', errorData);
         throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || 'Unknown error'}`);
       }
 
+      console.log('[BatchTestRunner] ✅ DEBUG: HTTP response OK, starting to read SSE stream...');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = ''; // Buffer to handle partial SSE events across chunks
+      let eventCount = 0;
 
       while (true) {
+        console.log('[BatchTestRunner] 🔄 DEBUG: Reading next chunk from SSE stream...');
         const { done, value } = await reader.read();
+        
         if (done) {
+          console.log('[BatchTestRunner] 🏁 DEBUG: SSE stream ended, processed', eventCount, 'events total');
           break;
         }
 
         // Decode chunk and add to buffer
         const chunk = decoder.decode(value, { stream: true });
+        console.log('[BatchTestRunner] 📨 DEBUG: Received chunk:', chunk.length, 'bytes');
         buffer += chunk;
 
         // Process complete lines from buffer
@@ -509,17 +530,21 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
+            eventCount++;
+            console.log('[BatchTestRunner] 📝 DEBUG: Processing SSE event #' + eventCount + ':', line.substring(0, 200) + (line.length > 200 ? '...' : ''));
             try {
               const eventData = JSON.parse(line.substring(6));
+              console.log('[BatchTestRunner] 📊 DEBUG: Parsed event data:', eventData.type, eventData.testName || 'no-test');
               handleTestEvent(eventData);
             } catch (parseError) {
-              // Silent parse error handling
+              console.log('[BatchTestRunner] ❌ DEBUG: Failed to parse SSE event:', parseError, 'Raw line:', line);
             }
           }
         }
       }
 
     } catch (err) {
+      console.log('[BatchTestRunner] ❌ DEBUG: Exception in runBatchTests:', err);
       setError(`Failed to execute batch tests: ${err.message}`);
       setIsRunning(false);
       setIsLoading(false); // CRITICAL: Reset loading state on error
@@ -901,11 +926,15 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const handleTestEvent = async (eventData) => {
+    console.log('[BatchTestRunner] 🎯 DEBUG: handleTestEvent called with:', eventData);
+    
     // CRITICAL FIX: Ensure testName is always converted to string early to prevent object propagation
     const rawTestName = eventData.testName || eventData.data?.testName;
     const testName = typeof rawTestName === 'string' ? rawTestName : 
                      (rawTestName?.name || rawTestName?.testName || String(rawTestName || 'unknown-test'));
     const eventTimestamp = eventData.timestamp || Date.now();
+    
+    console.log('[BatchTestRunner] 🔍 DEBUG: Extracted testName:', testName, 'from rawTestName:', rawTestName);
     
     // 🛡️ ENHANCED: Advanced event deduplication with collision prevention
     eventSequence.current++;
@@ -934,6 +963,8 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     // Keep more recent events for better deduplication
     eventsArray.slice(-100).forEach(key => processedEvents.current.add(key));
   }
+    
+    console.log(`[BatchTestRunner] 📝 DEBUG: Processing event type: ${eventData.type} for test: ${testName}`);
     
     // Only log critical events
     if (eventData.type === 'test_complete' || eventData.type === 'batch_complete') {
