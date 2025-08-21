@@ -1199,6 +1199,19 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         console.log('[BatchTestRunner] Phase update:', eventData.phase, eventData.message);
         break;
 
+      case 'progress_update':
+        // Handle progress updates from CLI (including cleanup phases)
+        console.log('[BatchTestRunner] Progress update:', eventData.phase, eventData.message);
+        if (eventData.message) {
+          setFilteredOutput(prev => [...prev, eventData.message]);
+        }
+        
+        // Update current phase if provided
+        if (eventData.phase) {
+          setCurrentPhase(eventData.phase);
+        }
+        break;
+
       case 'raw_output':
         // Handle raw terminal output for immediate display
         console.log('[BatchTestRunner] Raw output received:', eventData.output);

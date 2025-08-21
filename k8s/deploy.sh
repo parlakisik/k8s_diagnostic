@@ -325,9 +325,9 @@ open_browser() {
     fi
 }
 
-# Smart port forward setup with conflict resolution
+# Smart port forward setup with enhanced stability and reconnection
 setup_port_forward() {
-    echo -e "${BLUE}🚀 Setting up port forwarding...${NC}"
+    echo -e "${BLUE}🚀 Setting up enhanced port forwarding...${NC}"
     
     # Find available port starting from 3000
     local available_port=3000
@@ -342,36 +342,100 @@ setup_port_forward() {
     
     echo -e "${GREEN}✅ Using port $available_port for UI access${NC}"
     
-    # Start port forwarding in background
-    echo -e "${BLUE}Starting kubectl port-forward...${NC}"
-    kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui $available_port:3000 >/dev/null 2>&1 &
-    local port_forward_pid=$!
+    # ENHANCED: Wait for containers to be truly ready before port forwarding
+    echo -e "${BLUE}🔍 Ensuring containers are fully ready...${NC}"
+    POD_NAME=$(kubectl get pods -n k8s-diagnostic -o jsonpath='{.items[0].metadata.name}')
     
-    # Store PID for cleanup
-    echo $port_forward_pid > /tmp/k8s-diagnostic-port-forward.pid
+    # Wait for UI container to be ready
+    local ui_ready=false
+    for i in {1..30}; do
+        if kubectl exec -n k8s-diagnostic "${POD_NAME}" -c ui -- ps aux | grep -q "node.*server.js" 2>/dev/null; then
+            echo -e "${GREEN}✅ UI container application ready${NC}"
+            ui_ready=true
+            break
+        fi
+        echo -e "${YELLOW}⏳ Waiting for UI container to start... ($i/30)${NC}"
+        sleep 2
+    done
     
-    # Wait for port-forward to establish
-    echo -e "${BLUE}Waiting for port-forward to establish...${NC}"
-    sleep 3
+    if [[ "$ui_ready" != "true" ]]; then
+        echo -e "${YELLOW}⚠️  UI container may still be starting, continuing with port forwarding...${NC}"
+    fi
     
-    # Verify port-forward is working
-    if ! lsof -i :$available_port >/dev/null 2>&1; then
-        echo -e "${RED}❌ Port-forward failed to establish${NC}"
-        kill $port_forward_pid 2>/dev/null
+    # ENHANCED: Robust port forwarding with retry logic
+    local max_attempts=3
+    local port_forward_pid=""
+    
+    for attempt in $(seq 1 $max_attempts); do
+        echo -e "${BLUE}🔗 Port forward attempt $attempt/$max_attempts...${NC}"
+        
+        # Kill any existing port forwards to this service
+        pkill -f "kubectl port-forward.*k8s-diagnostic" 2>/dev/null || true
+        sleep 1
+        
+        # Start port forwarding with better error handling
+        kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui $available_port:3000 >/tmp/port-forward.log 2>&1 &
+        port_forward_pid=$!
+        
+        # Store PID for cleanup
+        echo $port_forward_pid > /tmp/k8s-diagnostic-port-forward.pid
+        
+        # ENHANCED: Progressive verification with health check
+        echo -e "${BLUE}🔍 Verifying port-forward stability (extended check)...${NC}"
+        local stable=false
+        
+        for check in {1..10}; do
+            sleep 1
+            
+            # Check if port forward process is still running
+            if ! kill -0 $port_forward_pid 2>/dev/null; then
+                echo -e "${YELLOW}⚠️  Port-forward process died, check $check/10${NC}"
+                break
+            fi
+            
+            # Check if port is listening
+            if ! lsof -i :$available_port >/dev/null 2>&1; then
+                echo -e "${YELLOW}⏳ Port not ready yet, check $check/10${NC}"
+                continue
+            fi
+            
+            # Test actual HTTP connectivity  
+            if curl -s --max-time 2 http://localhost:$available_port/api/debug-environment >/dev/null 2>&1; then
+                echo -e "${GREEN}✅ Port-forward verified with HTTP connectivity ($check/10)${NC}"
+                stable=true
+                break
+            else
+                echo -e "${YELLOW}⏳ HTTP connection not ready, check $check/10${NC}"
+            fi
+        done
+        
+        if [[ "$stable" == "true" ]]; then
+            break
+        else
+            echo -e "${YELLOW}⚠️  Attempt $attempt failed, retrying...${NC}"
+            kill $port_forward_pid 2>/dev/null || true
+            sleep 2
+        fi
+    done
+    
+    if [[ "$stable" != "true" ]]; then
+        echo -e "${RED}❌ Port-forward failed after $max_attempts attempts${NC}"
+        echo -e "${YELLOW}📄 Check /tmp/port-forward.log for details${NC}"
         return 1
     fi
     
     local access_url="http://localhost:$available_port"
-    echo -e "${GREEN}✅ Port-forward established successfully${NC}"
+    echo -e "${GREEN}✅ Robust port-forward established successfully${NC}"
     echo -e "${GREEN}📱 UI accessible at: $access_url${NC}"
     
-    # Launch browser
+    # Launch browser only after confirming stability
     open_browser "$access_url"
     
     echo ""
     echo -e "${YELLOW}🔧 Port-forward is running in background (PID: $port_forward_pid)${NC}"
     echo -e "${YELLOW}💡 To stop: kill $port_forward_pid${NC}"
     echo -e "${YELLOW}💡 Or use: pkill -f 'kubectl port-forward.*k8s-diagnostic'${NC}"
+    echo -e "${GREEN}🛡️  Enhanced stability - connection tested and verified${NC}"
     
     return 0
 }

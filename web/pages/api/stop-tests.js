@@ -1,11 +1,5 @@
 import { exec } from 'child_process';
-import { 
-  terminateTestProcess, 
-  getRunningTests, 
-  getActiveTestProcesses, 
-  getTestStateSync,
-  getProcessState 
-} from './run-batch-tests.js';
+import cliExecutionService from '../../services/CLIExecutionService.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -21,70 +15,109 @@ export default async function handler(req, res) {
   console.log(`[STOP API] 🛑 Received stop request - testId: ${testId}, testName: ${testName || 'ALL'}`);
 
   try {
-    // 🛡️ ENHANCED: Use the integrated state management system
-    const beforeState = getProcessState(testId);
-    console.log(`[STOP API] 📊 Before termination state:`, {
-      hasRunningTest: !!beforeState.runningTest,
-      activeProcessesCount: beforeState.activeProcesses?.length || 0,
-      testStatesCount: Object.keys(beforeState.testStates?.testStates || {}).length
-    });
-
-    // Use the enhanced termination function from run-batch-tests.js
-    const terminated = await terminateTestProcess(testId, testName);
+    // Environment-aware termination: Kubernetes vs Development mode
+    const isKubernetesMode = process.env.KUBERNETES_MODE === 'true';
+    console.log(`[STOP API] Environment detected: ${isKubernetesMode ? 'Kubernetes' : 'Development'} mode`);
     
-    if (terminated) {
-      // Also perform system-level cleanup as fallback
-      const systemKilled = await performSystemCleanup(testId);
+    if (isKubernetesMode) {
+      // Production/Kubernetes mode: Use CLIExecutionService
+      console.log(`[STOP API] Using CLIExecutionService for Kubernetes termination`);
       
-      const afterState = getProcessState(testId);
-      
-      console.log(`[STOP API] ✅ Termination successful - testId: ${testId}`);
-      console.log(`[STOP API] 📊 After termination state:`, {
-        hasRunningTest: !!afterState.runningTest,
-        activeProcessesCount: afterState.activeProcesses?.length || 0,
-        systemProcessesKilled: systemKilled
-      });
-      
-      res.status(200).json({ 
-        success: true, 
-        message: testName 
-          ? `Successfully terminated test: ${testName}` 
-          : `Successfully terminated all tests in batch: ${testId}`,
-        testId: testId,
-        testName: testName,
-        stateManaged: true,
-        systemProcessesKilled: systemKilled,
-        beforeState: {
-          running: !!beforeState.runningTest,
-          activeTests: beforeState.activeProcesses?.length || 0
-        },
-        afterState: {
-          running: !!afterState.runningTest,
-          activeTests: afterState.activeProcesses?.length || 0
-        }
-      });
-    } else {
-      // If state management termination failed, try system cleanup
-      const systemKilled = await performSystemCleanup(testId);
-      
-      console.log(`[STOP API] ⚠️ State management termination failed, system cleanup killed: ${systemKilled}`);
-      
-      if (systemKilled > 0) {
+      try {
+        await cliExecutionService.terminateExecution(testId);
+        
         res.status(200).json({ 
           success: true, 
-          message: `Terminated ${systemKilled} system processes (state management failed)`,
+          message: testName 
+            ? `Successfully terminated test: ${testName} (Kubernetes mode)` 
+            : `Successfully terminated all tests in batch: ${testId} (Kubernetes mode)`,
           testId: testId,
-          stateManaged: false,
-          systemProcessesKilled: systemKilled,
-          warning: 'Used fallback system termination - state may be inconsistent'
+          testName: testName,
+          mode: 'kubernetes'
         });
-      } else {
+      } catch (terminationError) {
+        console.warn(`[STOP API] CLIExecutionService termination failed: ${terminationError.message}`);
+        
         res.status(200).json({ 
           success: true, 
-          message: 'No running processes found to terminate',
+          message: 'Termination request sent to CLI container (response may be delayed)',
           testId: testId,
-          stateManaged: false,
-          systemProcessesKilled: 0
+          mode: 'kubernetes',
+          warning: 'CLI container termination status unknown'
+        });
+      }
+    } else {
+      // Development mode: Use local process management (preserve existing functionality)
+      console.log(`[STOP API] Using local process management for development termination`);
+      
+      try {
+        // Import dev functions dynamically to avoid errors in Kubernetes
+        const { 
+          terminateTestProcess, 
+          getProcessState 
+        } = await import('./run-batch-tests.js');
+        
+        const beforeState = getProcessState(testId);
+        console.log(`[STOP API] 📊 Before termination state:`, {
+          hasRunningTest: !!beforeState.runningTest,
+          activeProcessesCount: beforeState.activeProcesses?.length || 0
+        });
+
+        const terminated = await terminateTestProcess(testId, testName);
+        
+        if (terminated) {
+          // Also perform system-level cleanup as fallback
+          const systemKilled = await performSystemCleanup(testId);
+          
+          const afterState = getProcessState(testId);
+          
+          console.log(`[STOP API] ✅ Development termination successful - testId: ${testId}`);
+          
+          res.status(200).json({ 
+            success: true, 
+            message: testName 
+              ? `Successfully terminated test: ${testName} (Development mode)` 
+              : `Successfully terminated all tests in batch: ${testId} (Development mode)`,
+            testId: testId,
+            testName: testName,
+            mode: 'development',
+            stateManaged: true,
+            systemProcessesKilled: systemKilled,
+            beforeState: {
+              running: !!beforeState.runningTest,
+              activeTests: beforeState.activeProcesses?.length || 0
+            },
+            afterState: {
+              running: !!afterState.runningTest,
+              activeTests: afterState.activeProcesses?.length || 0
+            }
+          });
+        } else {
+          // If state management termination failed, try system cleanup
+          const systemKilled = await performSystemCleanup(testId);
+          
+          res.status(200).json({ 
+            success: true, 
+            message: `Development mode: Terminated ${systemKilled} system processes`,
+            testId: testId,
+            mode: 'development',
+            stateManaged: false,
+            systemProcessesKilled: systemKilled
+          });
+        }
+      } catch (devError) {
+        console.error(`[STOP API] Development mode termination error:`, devError);
+        
+        // Fallback to system cleanup
+        const systemKilled = await performSystemCleanup(testId);
+        
+        res.status(200).json({ 
+          success: true, 
+          message: `Fallback termination completed - killed ${systemKilled} processes`,
+          testId: testId,
+          mode: 'development-fallback',
+          systemProcessesKilled: systemKilled,
+          error: devError.message
         });
       }
     }
@@ -212,15 +245,34 @@ async function performSystemCleanup(testId) {
   }
 }
 
-// 🛡️ NEW: Health check function to validate state consistency
+// 🛡️ Environment-aware health check function 
 export async function validateStopState(testId) {
+  const isKubernetesMode = process.env.KUBERNETES_MODE === 'true';
+  
+  if (isKubernetesMode) {
+    // Kubernetes mode: Limited state checking available
+    return {
+      testId: testId,
+      mode: 'kubernetes',
+      message: 'State validation limited in Kubernetes mode'
+    };
+  }
+  
+  // Development mode: Full state checking
   try {
+    const { 
+      getProcessState,
+      getRunningTests,
+      getActiveTestProcesses
+    } = await import('./run-batch-tests.js');
+    
     const processState = getProcessState(testId);
     const runningTests = getRunningTests();
     const activeProcesses = getActiveTestProcesses();
     
     return {
       testId: testId,
+      mode: 'development',
       isRunning: runningTests.has(testId),
       hasActiveProcesses: processState.activeProcesses && processState.activeProcesses.length > 0,
       stateConsistent: !runningTests.has(testId) || processState.activeProcesses?.length > 0,
@@ -230,41 +282,76 @@ export async function validateStopState(testId) {
     console.error(`[STOP API] ❌ Error validating stop state:`, error);
     return {
       testId: testId,
+      mode: 'development',
       error: error.message,
       stateConsistent: false
     };
   }
 }
 
-// 🛡️ NEW: Emergency cleanup function for critical situations
+// 🛡️ Environment-aware emergency cleanup function
 export async function emergencyCleanup() {
+  const isKubernetesMode = process.env.KUBERNETES_MODE === 'true';
+  
   try {
-    console.log(`[STOP API] 🚨 EMERGENCY CLEANUP - Terminating all test processes`);
+    console.log(`[STOP API] 🚨 EMERGENCY CLEANUP - Mode: ${isKubernetesMode ? 'Kubernetes' : 'Development'}`);
     
-    const runningTests = getRunningTests();
-    const cleanupResults = [];
-    
-    // Terminate all tracked running tests
-    for (const [testId] of runningTests) {
+    if (isKubernetesMode) {
+      // Kubernetes mode: Use CLIExecutionService only
       try {
-        const result = await terminateTestProcess(testId);
-        cleanupResults.push({ testId, success: result });
+        await cliExecutionService.terminateExecution('emergency-cleanup');
+        
+        return {
+          success: true,
+          mode: 'kubernetes',
+          message: 'Emergency termination request sent to CLI container'
+        };
       } catch (error) {
-        cleanupResults.push({ testId, success: false, error: error.message });
+        return {
+          success: false,
+          mode: 'kubernetes',
+          error: error.message,
+          message: 'Failed to send emergency termination to CLI container'
+        };
       }
+    } else {
+      // Development mode: Full process management
+      const { 
+        getRunningTests,
+        terminateTestProcess
+      } = await import('./run-batch-tests.js');
+      
+      const runningTests = getRunningTests();
+      const cleanupResults = [];
+      
+      // Terminate all tracked running tests
+      for (const [testId] of runningTests) {
+        try {
+          const result = await terminateTestProcess(testId);
+          cleanupResults.push({ testId, success: result });
+        } catch (error) {
+          cleanupResults.push({ testId, success: false, error: error.message });
+        }
+      }
+      
+      // Also perform system-level cleanup
+      const systemKilled = await performSystemCleanup('emergency');
+      
+      return {
+        success: true,
+        mode: 'development',
+        terminatedTests: cleanupResults,
+        systemProcessesKilled: systemKilled,
+        message: `Emergency cleanup completed - ${cleanupResults.length} test batches, ${systemKilled} system processes`
+      };
     }
-    
-    // Also perform system-level cleanup
-    const systemKilled = await performSystemCleanup('emergency');
-    
-    return {
-      success: true,
-      terminatedTests: cleanupResults,
-      systemProcessesKilled: systemKilled,
-      message: `Emergency cleanup completed - ${cleanupResults.length} test batches, ${systemKilled} system processes`
-    };
   } catch (error) {
     console.error(`[STOP API] ❌ Emergency cleanup failed:`, error);
-    throw error;
+    return {
+      success: false,
+      mode: isKubernetesMode ? 'kubernetes' : 'development',
+      error: error.message,
+      message: 'Emergency cleanup failed'
+    };
   }
 }

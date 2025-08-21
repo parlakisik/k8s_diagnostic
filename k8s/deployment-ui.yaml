@@ -18,7 +18,7 @@ spec:
       serviceAccountName: k8s-diagnostic-cli-sa
       containers:
       - name: ui
-        image: daryakut453/k8s-diagnostic-ui:v4
+        image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-ui:${IMAGE_TAG}
         imagePullPolicy: Always
         env:
           - name: NODE_ENV
@@ -67,7 +67,7 @@ spec:
             memory: "512Mi"
             cpu: "500m"
       - name: cli
-        image: daryakut453/k8s-diagnostic-cli:v4
+        image: ${DOCKERHUB_USERNAME}/k8s-diagnostic-cli:${IMAGE_TAG}
         imagePullPolicy: Always
         command: ["/app/k8s-diagnostic"]
         args: ["serve", "--port=8080"]

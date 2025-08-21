@@ -68,8 +68,9 @@ class CLIExecutionService {
   async executeViaHTTP(testId, testList, responseStream) {
     console.log(`[CLIExecutionService] HTTP mode: Executing ${testList.length} tests via CLI container`);
     
-    // Start enhanced event polling for HTTP mode
-    const eventPoller = this.startUniversalEventPolling(testId, testList, responseStream);
+    // BALANCED: Minimal polling needed to fetch CLI-generated events
+    console.log(`[CLIExecutionService] HTTP mode: Starting minimal polling to fetch CLI events`);
+    const eventPoller = this.startMinimalPolling(testId, testList, responseStream);
     
     try {
       // Health check first
@@ -79,11 +80,8 @@ class CLIExecutionService {
       }
       console.log(`[CLIExecutionService] ✅ CLI container health check passed`);
 
-      // Wait for cleanup completion
-      const cleanupCompleted = await this.waitForCleanupCompletion(testId, testList);
-      if (!cleanupCompleted) {
-        console.warn(`[CLIExecutionService] ⚠️ Cleanup timeout in HTTP mode`);
-      }
+      // FIXED: No cleanup polling needed in HTTP mode - CLI handles everything
+      console.log(`[CLIExecutionService] HTTP mode: CLI container handles cleanup - no polling needed`);
 
       // Execute tests via HTTP
       let httpRequestsSuccessful = 0;
@@ -154,9 +152,8 @@ class CLIExecutionService {
         timestamp: new Date().toISOString()
       })}\n\n`);
 
-      // Stop event polling
+      // Stop minimal event polling
       this.stopEventPolling(eventPoller);
-      
       return { success: httpRequestsSuccessful > 0, mode: 'http' };
       
     } catch (error) {
@@ -384,15 +381,118 @@ class CLIExecutionService {
   }
 
   /**
-   * NO POLLING FUNCTION FOR DEV ENVIRONMENT - Events come from stdout only
-   * This function should never be called in dev mode
+   * FIXED: Minimal polling that fetches from ALL event sources
    */
-  startBatchOnlyPolling(testId, testList, responseStream) {
-    console.log(`[CLIExecutionService] ERROR: HTTP polling should not be used in dev environment!`);
-    console.log(`[CLIExecutionService] Dev environment relies on process stdout only - no HTTP polling needed`);
+  startMinimalPolling(testId, testList, responseStream) {
+    console.log(`[CLIExecutionService] Starting minimal polling for production: ${testId}, tests: ${testList.join(',')}`);
     
-    // Return null to indicate no polling should occur
-    return null;
+    let processedEventIds = new Set();
+    const pollingActive = { value: true };
+    let pollCount = 0;
+    
+    const pollFunction = async () => {
+      if (!pollingActive.value) return;
+      
+      pollCount++;
+      let foundEvents = false;
+      
+      try {
+        // Poll batch testId first
+        const batchResponse = await fetch(`${this.eventStorageURL}/api/log-events?testId=${testId}`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (batchResponse.ok) {
+          const batchData = await batchResponse.json();
+          if (batchData.events && batchData.events.length > 0) {
+            for (const event of batchData.events) {
+              const eventId = `${event.timestamp}_${event.type}_${event.testName || event.testId}`;
+              if (!processedEventIds.has(eventId)) {
+                processedEventIds.add(eventId);
+                responseStream.write(`data: ${JSON.stringify(event)}\n\n`);
+                responseStream.flush();
+                foundEvents = true;
+                console.log(`[CLIExecutionService] Forwarded batch event: ${event.type}`);
+              }
+            }
+          }
+        }
+        
+        // CRITICAL: Poll actual test names from testList parameter where CLI stores events
+        console.log(`[CLIExecutionService] Polling individual test events for: ${testList.join(',')}`);
+        
+        for (const testName of testList) {
+          try {
+            const testResponse = await fetch(`${this.eventStorageURL}/api/log-events?testId=${testName}`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (testResponse.ok) {
+              const testData = await testResponse.json();
+              if (testData.events && testData.events.length > 0) {
+                for (const event of testData.events) {
+                  const eventId = `${event.timestamp}_${event.type}_${event.testName || event.testId}`;
+                  if (!processedEventIds.has(eventId)) {
+                    processedEventIds.add(eventId);
+                    
+                    // Transform event to include batch context
+                    const transformedEvent = {
+                      ...event,
+                      testName: testName,
+                      batchTestId: testId
+                    };
+                    
+                    responseStream.write(`data: ${JSON.stringify(transformedEvent)}\n\n`);
+                    responseStream.flush();
+                    foundEvents = true;
+                    console.log(`[CLIExecutionService] Forwarded test event: ${event.type} for ${testName}`);
+                  }
+                }
+              }
+            }
+          } catch (testError) {
+            // Continue with other tests
+          }
+        }
+        
+        if (foundEvents) {
+          console.log(`[CLIExecutionService] ✅ Successfully forwarded events to production UI`);
+        }
+        
+        // Stop after reasonable time
+        if (pollCount > 60) {
+          console.log(`[CLIExecutionService] Stopping minimal polling after ${pollCount} polls`);
+          pollingActive.value = false;
+          return;
+        }
+        
+        // Continue polling every 2 seconds
+        if (pollingActive.value) {
+          setTimeout(pollFunction, 2000);
+        }
+        
+      } catch (error) {
+        console.warn(`[CLIExecutionService] Minimal polling error: ${error.message}`);
+        if (pollCount < 60) {
+          setTimeout(pollFunction, 3000);
+        } else {
+          pollingActive.value = false;
+        }
+      }
+    };
+    
+    // Start polling immediately
+    pollFunction();
+    
+    return {
+      active: pollingActive,
+      testId: testId,
+      cleanup: () => {
+        processedEventIds.clear();
+      }
+    };
   }
 
   /**
@@ -424,7 +524,7 @@ class CLIExecutionService {
    * FINAL SOLUTION: Smart poller that stops after batch completion
    */
   createSmartPoller(testId, testList, responseStream) {
-    console.log(`[CLIExecutionService] Creating final smart poller for ${testId}`);
+    console.log(`[CLIExecutionService] Creating smart poller for ${testId}`);
     
     let totalEventsSeen = 0;
     let pollInterval = this.pollingConfig.initialInterval;
@@ -434,13 +534,6 @@ class CLIExecutionService {
     
     const pollFunction = async () => {
       if (!pollingActive.value) return;
-      
-      // Check if batch is complete - stop polling immediately
-      if (this.batchCompletionState && this.batchCompletionState.batchComplete) {
-        console.log(`[CLIExecutionService] Batch completed - stopping polling for ${testId}`);
-        pollingActive.value = false;
-        return;
-      }
       
       try {
         const events = await this.fetchNewEvents(testId, testList, totalEventsSeen);
@@ -476,6 +569,7 @@ class CLIExecutionService {
           
           for (const event of newEvents) {
             responseStream.write(`data: ${JSON.stringify(event)}\n\n`);
+            responseStream.flush();
           }
           
           totalEventsSeen = Math.max(totalEventsSeen, events.length);
@@ -513,32 +607,18 @@ class CLIExecutionService {
       cleanup: () => {
         eventHashes.clear();
         this.activePollers.delete(testId);
-        if (this.testsWithEvents) {
-          this.testsWithEvents.clear();
-        }
-        if (this.batchCompletionState) {
-          delete this.batchCompletionState;
-        }
       }
     };
   }
 
   /**
-   * FINAL FIX: Only poll batch ID - eliminate individual test polling completely
+   * FIXED: Fetch new events with robust JSON parsing for both batch and individual events
    */
   async fetchNewEvents(testId, testList, lastEventCount) {
     const allEvents = [];
     
-    // Track completion state to know when to stop polling entirely
-    if (!this.batchCompletionState) {
-      this.batchCompletionState = { 
-        completedTests: new Set(),
-        batchComplete: false 
-      };
-    }
-    
     try {
-      // ONLY poll the batch testId - simplest solution
+      // Primary: Poll with batch testId
       const eventResponse = await fetch(`${this.eventStorageURL}/api/log-events?testId=${testId}`, {
         method: 'GET',
         headers: { 
@@ -548,64 +628,55 @@ class CLIExecutionService {
       });
       
       if (eventResponse.ok) {
-        const eventData = await eventResponse.json();
-        
-        if (eventData.events && eventData.events.length > lastEventCount) {
-          // Only get new events since last count
-          const newEvents = eventData.events.slice(lastEventCount);
-          allEvents.push(...newEvents);
+        try {
+          const eventData = await eventResponse.json();
           
-          // Check for completion events to stop polling
-          for (const event of newEvents) {
-            if (event.type === 'test_complete' && event.testName) {
-              this.batchCompletionState.completedTests.add(event.testName);
-            }
-            if (event.type === 'batch_complete') {
-              this.batchCompletionState.batchComplete = true;
-            }
+          if (eventData.events && eventData.events.length > lastEventCount) {
+            allEvents.push(...eventData.events.slice(lastEventCount));
           }
+        } catch (jsonError) {
+          console.warn(`[CLIExecutionService] JSON parsing failed for batch ${testId}: ${jsonError.message}`);
         }
       }
       
-      // Poll individual test names ONLY if batch polling didn't get events
-      // AND only for tests that are likely to be running now
-      if (allEvents.length === 0) {
-        // Find the most likely active test (first one that hasn't completed)
-        const nextActiveTest = testList.find(testName => 
-          !this.batchCompletionState.completedTests.has(testName)
-        );
-        
-        if (nextActiveTest) {
-          try {
-            const individualResponse = await fetch(`${this.eventStorageURL}/api/log-events?testId=${nextActiveTest}`, {
-              method: 'GET',
-              headers: { 'Content-Type': 'application/json' },
-              signal: AbortSignal.timeout(500)
-            });
-            
-            if (individualResponse.ok) {
+      // Fallback: Poll individual test names for additional events
+      for (const testName of testList) {
+        try {
+          const individualResponse = await fetch(`${this.eventStorageURL}/api/log-events?testId=${testName}`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(1000)
+          });
+          
+          if (individualResponse.ok) {
+            try {
               const individualData = await individualResponse.json();
               
               if (individualData.events && individualData.events.length > 0) {
+                // Transform events to include batch context
                 for (const event of individualData.events) {
                   const transformedEvent = {
                     ...event,
-                    testName: nextActiveTest,
+                    testName: testName,
                     batchTestId: testId
                   };
                   allEvents.push(transformedEvent);
                 }
-                console.log(`[CLIExecutionService] Found ${allEvents.length} events for active test: ${nextActiveTest}`);
               }
+            } catch (jsonError) {
+              console.warn(`[CLIExecutionService] JSON parsing failed for test ${testName}: ${jsonError.message}`);
             }
-          } catch (error) {
-            // Silently ignore
+          }
+        } catch (individualError) {
+          // Individual poll failures are non-critical
+          if (this.config.enableVerbosePolling) {
+            console.log(`[CLIExecutionService] Individual poll failed for ${testName}: ${individualError.message}`);
           }
         }
       }
       
     } catch (error) {
-      console.warn(`[CLIExecutionService] Event fetch failed: ${error.message}`);
+      console.warn(`[CLIExecutionService] Batch event fetch failed: ${error.message}`);
     }
     
     if (allEvents.length > 0) {
@@ -664,7 +735,7 @@ class CLIExecutionService {
   stopEventPolling(eventPoller) {
     // CRITICAL FIX: Handle null poller (when no polling was started)
     if (!eventPoller) {
-      console.log(`[CLIExecutionService] No event poller to stop (spawn mode)`);
+      console.log(`[CLIExecutionService] No event poller to stop`);
       return;
     }
     
@@ -683,36 +754,6 @@ class CLIExecutionService {
     }
     
     console.log(`[CLIExecutionService] Event polling stopped for ${eventPoller.testId || 'unknown'}`);
-  }
-
-  /**
-   * Universal event forwarding to storage - implements missing storeEventInLogAPI functionality
-   */
-  async forwardEventToStorage(event, batchTestId) {
-    try {
-      // Ensure event has batch context
-      const enrichedEvent = {
-        ...event,
-        testId: batchTestId || event.testId,
-        batchTestId: batchTestId,
-        timestamp: event.timestamp || new Date().toISOString()
-      };
-
-      const response = await fetch(`${this.eventStorageURL}/api/log-events`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(enrichedEvent)
-      });
-
-      if (!response.ok) {
-        console.warn(`[CLIExecutionService] Event storage failed: ${response.status}`);
-      }
-      
-    } catch (error) {
-      console.warn(`[CLIExecutionService] Event forwarding error: ${error.message}`);
-    }
   }
 
   /**
