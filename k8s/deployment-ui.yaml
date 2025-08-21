@@ -121,14 +121,14 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 6
-        # 🚀 ENHANCED: Resource limits for stability
+        # 🚀 ENHANCED: Resource limits optimized for production performance
         resources:
           requests:
             memory: "512Mi"
-            cpu: "200m"
+            cpu: "500m"          # Increased from 200m to 500m (2.5x more CPU)
           limits:
-            memory: "1Gi"
-            cpu: "1000m"
+            memory: "2Gi"        # Increased from 1Gi to 2Gi for better performance  
+            cpu: "2000m"         # Increased from 1000m to 2000m (2 CPUs for kubectl operations)
       volumes:
         - name: shared
           persistentVolumeClaim:
