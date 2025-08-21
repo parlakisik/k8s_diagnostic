@@ -148,6 +148,83 @@ export const validateConfiguration = () => {
 };
 
 /**
+ * Generate environment-appropriate CLI command for display
+ */
+export const generateCliCommand = (testName) => {
+  const config = getExecutionConfig();
+  
+  if (config.mode === 'kubernetes') {
+    // Production: Show kubectl exec command
+    return `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`;
+  } else {
+    // Development: Show direct command
+    return `./k8s_diagnostic test list: ${testName} --verbose`;
+  }
+};
+
+/**
+ * Get current Kubernetes pod name (for production environment)
+ */
+export const getCurrentPodName = async () => {
+  const config = getExecutionConfig();
+  
+  if (config.mode !== 'kubernetes') {
+    return null; // Not applicable in dev mode
+  }
+  
+  try {
+    // Check if we can detect pod name from environment or hostname
+    const hostname = process.env.HOSTNAME;
+    if (hostname && hostname.startsWith('k8s-diagnostic-ui-')) {
+      return hostname;
+    }
+    
+    // Fallback to generic pod selector
+    return '[pod-name]';
+  } catch (error) {
+    return '[pod-name]';
+  }
+};
+
+/**
+ * Generate environment-specific CLI command with actual pod name
+ */
+export const generateContextAwareCliCommand = async (testName) => {
+  const config = getExecutionConfig();
+  
+  if (config.mode === 'kubernetes') {
+    const podName = await getCurrentPodName();
+    const actualPodName = podName && podName !== '[pod-name]' ? podName : '[pod-name]';
+    return `kubectl exec -it ${actualPodName} -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`;
+  } else {
+    return `./k8s_diagnostic test list: ${testName} --verbose`;
+  }
+};
+
+/**
+ * Check if running in Kubernetes environment
+ */
+export const isKubernetesEnvironment = () => {
+  const config = getExecutionConfig();
+  return config.mode === 'kubernetes';
+};
+
+/**
+ * Get environment display name
+ */
+export const getEnvironmentDisplayName = () => {
+  const config = getExecutionConfig();
+  
+  if (config.mode === 'kubernetes') {
+    return 'Kubernetes Pod';
+  } else if (config.environment.isDevelopment) {
+    return 'Local Development';
+  } else {
+    return 'Docker Compose';
+  }
+};
+
+/**
  * Log current configuration (for debugging)
  */
 export const logConfiguration = () => {
@@ -177,5 +254,10 @@ export default {
   getPollingConfig,
   getRetryConfig,
   validateConfiguration,
+  generateCliCommand,
+  getCurrentPodName,
+  generateContextAwareCliCommand,
+  isKubernetesEnvironment,
+  getEnvironmentDisplayName,
   logConfiguration
 };

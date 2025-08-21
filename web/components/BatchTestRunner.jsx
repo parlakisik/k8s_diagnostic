@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getTestInsights } from '../utils/testInsights';
 import { TestDefinition, TestCollection, createTestCollection } from '../utils/testDefinitions';
+import { generateCliCommand, isKubernetesEnvironment, getEnvironmentDisplayName } from '../config/executionConfig';
 
 // Global bounce animation styles
 const bounceStyles = `
@@ -232,6 +233,10 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const [connectionLost, setConnectionLost] = useState(false); // Track SSE connection status
   const [showCliCommands, setShowCliCommands] = useState(false); // CLI commands visibility toggle
   
+  // 🚀 NEW: Server-side environment configuration
+  const [environmentConfig, setEnvironmentConfig] = useState(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(true);
+  
   // 🕒 Progressive Status System - Track test timing for user feedback
   const [testStartTimes, setTestStartTimes] = useState(new Map());
   const [testStatusMessages, setTestStatusMessages] = useState(new Map()); // Backend heartbeat messages
@@ -360,14 +365,20 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       return '';
     }
     
-    // Test execution phase
-    if (trimmed.includes('Running test:') || trimmed.includes('Starting networking tests')) {
+    // Test execution phase - FIXED: Always show test execution messages
+    if (trimmed.includes('Running test:') || trimmed.includes('Starting networking tests') || 
+        trimmed.includes('🧪 Running diagnostic tests') || trimmed.includes('Executing diagnostic test')) {
       const newMessage = '🧪 Test execution phase...';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
+      // Don't filter duplicates for test execution - users need to see this phase
+      return newMessage;
+    }
+    
+    // Individual test progress messages  
+    if (trimmed.includes('Running test:')) {
+      const testMatch = trimmed.match(/Running test:\s*(.+?)(?:\s|$)/);
+      if (testMatch) {
+        return `🔬 Executing: ${testMatch[1]}`;
       }
-      return '';
     }
     
     return ''; // Filter out everything else
@@ -1249,6 +1260,43 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return '';
   };
 
+  // 🚀 NEW: Fetch server-side environment configuration
+  useEffect(() => {
+    const fetchEnvironmentConfig = async () => {
+      try {
+        setEnvironmentLoading(true);
+        const response = await fetch('/api/environment-config');
+        if (response.ok) {
+          const config = await response.json();
+          setEnvironmentConfig(config);
+          console.log('[BatchTestRunner] 🌍 Environment config loaded:', config.environmentName, config.mode);
+        } else {
+          console.error('[BatchTestRunner] Failed to fetch environment config');
+          // Fallback to client-side detection
+          setEnvironmentConfig({
+            mode: 'docker-compose',
+            environmentName: 'Local Development',
+            isKubernetes: false,
+            isDevelopment: true
+          });
+        }
+      } catch (error) {
+        console.error('[BatchTestRunner] Environment config fetch error:', error);
+        // Fallback to client-side detection
+        setEnvironmentConfig({
+          mode: 'docker-compose',
+          environmentName: 'Local Development',
+          isKubernetes: false,
+          isDevelopment: true
+        });
+      } finally {
+        setEnvironmentLoading(false);
+      }
+    };
+
+    fetchEnvironmentConfig();
+  }, []);
+
   // Initialize empty test states and cleanup on unmount
   useEffect(() => {
     // Initialize skeleton test states for display
@@ -1496,13 +1544,25 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     };
   };
 
-  // Copy CLI command to clipboard
+  // Server-side environment-aware CLI command generation and clipboard copy
   const copyCommandToClipboard = async (testName) => {
-    const command = `./k8s_diagnostic test list: ${testName} --verbose`;
+    let command;
+    
+    if (environmentConfig && environmentConfig.sampleCommands) {
+      // Use server-side generated command
+      command = environmentConfig.sampleCommands[testName] || 
+               (environmentConfig.isKubernetes 
+                 ? `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`
+                 : `./k8s_diagnostic test list: ${testName} --verbose`);
+    } else {
+      // Fallback to client-side generation
+      command = generateCliCommand(testName);
+    }
+    
     try {
       await navigator.clipboard.writeText(command);
-      // Could add a toast notification here
-      console.log(`[BatchTestRunner] Copied command to clipboard: ${command}`);
+      const envType = environmentConfig?.environmentName || 'Unknown';
+      console.log(`[BatchTestRunner] Copied ${envType} command to clipboard: ${command}`);
     } catch (err) {
       console.error('[BatchTestRunner] Failed to copy to clipboard:', err);
       // Fallback: select text (older browser support)
@@ -1513,6 +1573,23 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       document.execCommand('copy');
       document.body.removeChild(textArea);
     }
+  };
+
+  // Get environment-aware CLI command for display
+  const getCliCommandForDisplay = (testName) => {
+    if (environmentConfig && environmentConfig.sampleCommands) {
+      return environmentConfig.sampleCommands[testName] || 
+             (environmentConfig.isKubernetes 
+               ? `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`
+               : `./k8s_diagnostic test list: ${testName} --verbose`);
+    }
+    // Fallback to client-side generation
+    return generateCliCommand(testName);
+  };
+
+  // Get environment display name
+  const getEnvironmentDisplayNameFromConfig = () => {
+    return environmentConfig?.environmentName || getEnvironmentDisplayName();
   };
 
   // Handler for starting tests
@@ -1845,7 +1922,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   </div>
                 </div>
 
-                {/* CLI Command Section - Terminal Style */}
+                {/* CLI Command Section - Environment-Aware Terminal Style */}
                 {showCliCommands && (
                   <div className="rounded text-white cli-command mb-3" style={{
                     fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
@@ -1860,7 +1937,17 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                     display: 'block',
                     position: 'relative'
                   }}>
-                    ./k8s_diagnostic test list: {testNameString} --verbose
+                    {/* Environment-aware command display */}
+                    {getCliCommandForDisplay(testNameString)}
+                    {/* Environment indicator */}
+                    <div style={{
+                      fontSize: '0.625rem',
+                      color: 'rgb(156, 163, 175)',
+                      marginTop: '2px',
+                      fontStyle: 'italic'
+                    }}>
+                      {getEnvironmentDisplayNameFromConfig()} Mode
+                    </div>
                     <span 
                       title="Copy command to clipboard"
                       onClick={() => copyCommandToClipboard(testNameString)}
