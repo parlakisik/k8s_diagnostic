@@ -171,6 +171,10 @@ class CLIExecutionService {
     console.log(`[CLIExecutionService] Spawn mode: Executing ${testList.length} tests via spawned process`);
     console.log(`[CLIExecutionService] Dev environment: Events will come from process stdout - NO HTTP polling whatsoever`);
     
+    // CRITICAL: Clear stdout deduplication for fresh test run
+    this.stdoutDeduplication = new Set();
+    console.log(`[CLIExecutionService] ✅ Cleared stdout deduplication for fresh run: ${testId}`);
+    
     try {
       const testListString = testList.join(',');
       
@@ -273,13 +277,33 @@ class CLIExecutionService {
   /**
    * Process stdout output from spawned process and forward events
    * FIXED: Add flush() after every write to ensure SSE events reach frontend
+   * ENHANCED: Add deduplication to prevent duplicate stdout lines
    */
   processSpawnOutput(output, responseStream, testId) {
+    // Initialize deduplication tracking if not exists
+    if (!this.stdoutDeduplication) {
+      this.stdoutDeduplication = new Set();
+    }
+    
     const lines = output.split('\n');
     
     lines.forEach(line => {
       const trimmedLine = line.trim();
       if (!trimmedLine) return;
+
+      // ENHANCED DEDUPLICATION: Check if this exact line was already processed
+      const lineHash = `${trimmedLine}_${Date.now() - (Date.now() % 5000)}`; // 5-second deduplication window
+      if (this.stdoutDeduplication.has(lineHash)) {
+        console.log(`[CLIExecutionService] 🚫 Duplicate stdout line blocked: ${trimmedLine.substring(0, 50)}...`);
+        return;
+      }
+      this.stdoutDeduplication.add(lineHash);
+
+      // Clean up old deduplication entries periodically
+      if (this.stdoutDeduplication.size > 100) {
+        const dedupArray = Array.from(this.stdoutDeduplication);
+        this.stdoutDeduplication = new Set(dedupArray.slice(-50)); // Keep most recent 50
+      }
 
       console.log(`[CLIExecutionService] Stdout line: ${trimmedLine.substring(0, 100)}...`);
 

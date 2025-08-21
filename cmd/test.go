@@ -1197,7 +1197,27 @@ All test resources will be created in the specified namespace (default: diagnost
 
 		// Universal pre-test cleanup before ANY testing begins - uses clean hierarchical format
 		fmt.Printf("🧹 Pre-test cleanup phase...\n")
+
+		// CRITICAL: Emit cleanup start event for PROD mode real-time UI updates
+		emitSSEEvent(map[string]interface{}{
+			"type":      "cleanup_start",
+			"testName":  "universal",
+			"message":   "🧹 Pre-test cleanup phase - STARTED",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"phase":     "cleanup",
+		})
+
 		tester.CleanupAllTestResources(timeoutCtx, false)
+
+		// CRITICAL: Emit cleanup complete event for PROD mode real-time UI updates
+		emitSSEEvent(map[string]interface{}{
+			"type":      "cleanup_complete",
+			"testName":  "universal",
+			"message":   "✅ Pre-test cleanup phase - COMPLETED",
+			"timestamp": time.Now().Format(time.RFC3339),
+			"phase":     "cleanup",
+		})
+
 		fmt.Printf("✅ Pre-test cleanup completed\n")
 
 		// Run all diagnostic tests

@@ -258,7 +258,7 @@ var httpRequestCounter int64 = 0
 
 // handleTestExecution processes test execution requests from UI container
 func handleTestExecution(w http.ResponseWriter, r *http.Request) {
-	// 🚨 CRITICAL: Increment request counter immediately to track all incoming requests
+	// Increment request counter immediately to track all incoming requests
 	httpRequestCounter++
 	requestID := httpRequestCounter
 
@@ -397,13 +397,19 @@ func executeTest(testID, cliCommand string, args []string) (bool, string, error)
 	log.Printf("  CLICommand: %s", cliCommand)
 	log.Printf("  Args: %v", args)
 
-	// 🚨 CRITICAL: Send test_start event immediately
+	// Send test_start event immediately
 	sendTestEvent(testID, "test_start", fmt.Sprintf("Starting test: %s", testID), true)
 
-	// 🚨 CRITICAL: Use optimized Kubernetes production cleanup instead of comprehensive deepclean
+	// Use optimized Kubernetes production cleanup instead of comprehensive deepclean
 	log.Printf("🧹 [CLI EXEC] Starting optimized Kubernetes production cleanup...")
 
-	// 🚀 PERFORMANCE FIX: Use lightweight cleanup optimized for individual test execution
+	// First wait for any ongoing cleanup operations with progress reporting
+	if err := waitForCleanupCompletionWithProgress(testID); err != nil {
+		log.Printf("⚠️ [CLI EXEC] Cleanup completion check had issues: %v", err)
+		// Continue anyway as the function allows test to proceed
+	}
+
+	// Use lightweight cleanup optimized for individual test execution
 	if err := executeOptimizedKubernetesCleanup(testID); err != nil {
 		log.Printf("❌ [CLI EXEC] Optimized cleanup execution failed: %v", err)
 		sendProgressUpdate(testID, "cleanup_failed", fmt.Sprintf("❌ Optimized cleanup execution failed: %v", err))
@@ -757,7 +763,7 @@ func parseTestResults(workingDir, output, testID string) (bool, string) {
 				log.Printf("📄 [CLI EXEC] Found JSON results file path in output: %s", jsonPath)
 				log.Printf("🔍 [CLI EXEC] Working directory: %s", workingDir)
 
-				// 🛡️ CRITICAL FIX: Let parseJSONResults handle path construction
+				// Let parseJSONResults handle path construction
 				// This prevents path duplication by passing the original path
 				// parseJSONResults will handle absolute vs relative path logic correctly
 				if success, message := parseJSONResults(jsonPath, testID); message != "" {
@@ -1273,126 +1279,6 @@ func executeOptimizedKubernetesCleanup(testID string) error {
 	return nil
 }
 
-// executeDetailedCleanupWithProgress executes the actual cleanup process and captures detailed output
-func executeDetailedCleanupWithProgress(testID string) error {
-	log.Printf("🧹 [CLI CLEANUP] Starting detailed cleanup process for TestID: %s", testID)
-
-	// Determine the correct binary path
-	var binaryPath string
-	binaryOptions := []string{
-		"/app/k8s-diagnostic",
-		"/usr/local/bin/k8s-diagnostic",
-		"/app/k8s_diagnostic",
-		os.Args[0], // Current process path as fallback
-	}
-
-	for _, path := range binaryOptions {
-		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-			binaryPath = path
-			log.Printf("✅ [CLI CLEANUP] Found binary at: %s", binaryPath)
-			break
-		}
-	}
-
-	if binaryPath == "" {
-		log.Printf("❌ [CLI CLEANUP] No valid binary found")
-		return fmt.Errorf("no valid binary found for cleanup execution")
-	}
-
-	// Execute cleanup command with detailed output capture
-	cmd := exec.Command(binaryPath, "deepclean", "--verbose")
-
-	// Set up environment
-	env := os.Environ()
-	sharedPath := os.Getenv("SHARED_VOLUME_PATH")
-	if sharedPath == "" {
-		sharedPath = "/app/shared/repository/test_results"
-	}
-	env = append(env, fmt.Sprintf("SHARED_VOLUME_PATH=%s", sharedPath))
-	cmd.Env = env
-
-	// Set working directory
-	var workingDir string
-	if stat, err := os.Stat(sharedPath); err == nil && stat.IsDir() {
-		workingDir = filepath.Dir(sharedPath) // Go up one level to repository root
-	} else {
-		workingDir = "/app" // Default to /app in container
-	}
-	cmd.Dir = workingDir
-
-	log.Printf("🔧 [CLI CLEANUP] Executing cleanup command:")
-	log.Printf("  Binary: %s", binaryPath)
-	log.Printf("  Args: [deepclean --verbose]")
-	log.Printf("  Working Directory: %s", workingDir)
-
-	// Capture stdout and stderr
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	// Execute cleanup command
-	startTime := time.Now()
-	err := cmd.Run()
-	duration := time.Since(startTime)
-
-	stdoutStr := stdout.String()
-	stderrStr := stderr.String()
-
-	log.Printf("⏱️ [CLI CLEANUP] Cleanup execution completed in %v", duration)
-	log.Printf("📊 [CLI CLEANUP] Cleanup results:")
-	log.Printf("  Exit Code: %v", err)
-	log.Printf("  Stdout Length: %d bytes", len(stdoutStr))
-	log.Printf("  Stderr Length: %d bytes", len(stderrStr))
-
-	// Forward cleanup output to UI line by line
-	if len(stdoutStr) > 0 {
-		log.Printf("📄 [CLI CLEANUP] Processing cleanup output...")
-		lines := strings.Split(stdoutStr, "\n")
-
-		for _, line := range lines {
-			trimmedLine := strings.TrimSpace(line)
-			if trimmedLine != "" {
-				log.Printf("📡 [CLI CLEANUP] Forwarding: %s", trimmedLine)
-
-				// Forward each cleanup line as live output to UI
-				sseEvent := map[string]interface{}{
-					"type":      "live_output",
-					"testName":  testID,
-					"output":    line + "\n",
-					"timestamp": time.Now().UTC().Format(time.RFC3339),
-				}
-
-				// Forward to UI
-				forwardEventToUI(testID, sseEvent)
-
-				// Small delay to ensure UI can process messages in order
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-	}
-
-	// Log stderr if any
-	if len(stderrStr) > 0 {
-		log.Printf("📄 [CLI CLEANUP] STDERR: %s", stderrStr)
-		// Also forward stderr as output
-		sseEvent := map[string]interface{}{
-			"type":      "live_output",
-			"testName":  testID,
-			"output":    "CLEANUP ERROR: " + stderrStr + "\n",
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-		}
-		forwardEventToUI(testID, sseEvent)
-	}
-
-	if err != nil {
-		log.Printf("❌ [CLI CLEANUP] Cleanup command failed: %v", err)
-		return fmt.Errorf("cleanup command failed: %v", err)
-	}
-
-	log.Printf("✅ [CLI CLEANUP] Detailed cleanup completed successfully for TestID=%s", testID)
-	return nil
-}
-
 // waitForCleanupCompletionWithProgress is enhanced version with progress reporting
 func waitForCleanupCompletionWithProgress(testID string) error {
 	log.Printf("🧹 [CLI CLEANUP] Starting cleanup completion check for TestID: %s", testID)
@@ -1491,7 +1377,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(wrapped, r)
 
 		duration := time.Since(start)
-		log.Printf("📊 %s %s %d %v", r.Method, r.URL.Path, wrapped.statusCode, duration)
+		log.Printf("� %s %s %d %v", r.Method, r.URL.Path, wrapped.statusCode, duration)
 	})
 }
 
