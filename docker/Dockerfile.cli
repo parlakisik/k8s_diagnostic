@@ -1,19 +1,79 @@
 FROM golang:1.21-alpine AS builder
 WORKDIR /app
 
-# Configure Go build environment for reliability and static linking
-ENV GOPROXY=https://proxy.golang.org,direct \
+# Configure Go build environment for reliability and static linking with comprehensive network fixes
+ENV GOPROXY=https://proxy.golang.org,https://goproxy.cn,https://goproxy.io,direct \
     GOSUMDB=sum.golang.org \
+    GOPRIVATE="" \
+    GOCACHE=/tmp/gocache \
+    GOMODCACHE=/tmp/gomodcache \
     CGO_ENABLED=0 \
     GOOS=linux \
-    GOARCH=amd64
+    GOARCH=amd64 \
+    GO111MODULE=on
 
-RUN apk add --no-cache git ca-certificates
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Copy go module files first for better caching
 COPY go.mod go.sum ./
+
+# Download dependencies with retry logic and multiple proxies
+RUN set -e; \
+    for i in 1 2 3; do \
+        echo "Attempt $i: Downloading Go modules..."; \
+        if go mod download -x; then \
+            echo "Successfully downloaded modules on attempt $i"; \
+            break; \
+        else \
+            echo "Failed attempt $i, trying with different proxy..."; \
+            if [ $i -eq 1 ]; then \
+                export GOPROXY=https://goproxy.cn,direct; \
+            elif [ $i -eq 2 ]; then \
+                export GOPROXY=https://goproxy.io,direct; \
+            fi; \
+            sleep 2; \
+        fi; \
+        if [ $i -eq 3 ]; then \
+            echo "All download attempts failed"; \
+            exit 1; \
+        fi; \
+    done
+
+# Copy source code
 COPY . .
 
-# Build with fallback: try readonly first, then download modules if needed
-RUN go build -mod=readonly -o k8s-diagnostic . || (go mod download && go build -o k8s-diagnostic .)
+# Build with comprehensive fallback strategy
+RUN set -e; \
+    echo "Building with mod=readonly first..."; \
+    if go build -mod=readonly -v -o k8s-diagnostic .; then \
+        echo "Successfully built with readonly modules"; \
+    else \
+        echo "Readonly build failed, trying with module download..."; \
+        for i in 1 2 3; do \
+            echo "Build attempt $i with module sync..."; \
+            if go mod tidy && go build -v -o k8s-diagnostic .; then \
+                echo "Successfully built on attempt $i"; \
+                break; \
+            else \
+                echo "Build attempt $i failed"; \
+                if [ $i -eq 1 ]; then \
+                    export GOPROXY=https://goproxy.cn,direct; \
+                elif [ $i -eq 2 ]; then \
+                    export GOPROXY=https://goproxy.io,direct; \
+                fi; \
+                sleep 2; \
+            fi; \
+            if [ $i -eq 3 ]; then \
+                echo "All build attempts failed"; \
+                exit 1; \
+            fi; \
+        done; \
+    fi
+
+# Verify binary was created and test all commands
+RUN ls -la k8s-diagnostic && ./k8s-diagnostic --help
+RUN echo "🧪 Testing serve command availability:" && (./k8s-diagnostic serve --help 2>&1 || echo "⚠️ Serve command issue detected")
 
 FROM alpine:latest
 RUN apk --no-cache add curl ca-certificates
@@ -23,6 +83,15 @@ RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/s
     && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
 WORKDIR /app
-COPY --from=builder /app/k8s-diagnostic .
+COPY --from=builder /app/k8s-diagnostic /app/k8s-diagnostic
 
-ENTRYPOINT ["./k8s-diagnostic"]
+# Verify the binary exists and is executable
+RUN ls -la /app/k8s-diagnostic
+RUN chmod +x /app/k8s-diagnostic
+
+# Test that the binary works and has the serve command
+RUN /app/k8s-diagnostic --help
+RUN /app/k8s-diagnostic serve --help
+
+# Simple startup with clear binary path
+CMD ["/app/k8s-diagnostic", "serve", "--port=8080"]

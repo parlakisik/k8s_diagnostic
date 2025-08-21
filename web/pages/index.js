@@ -5,6 +5,7 @@ import BatchTestRunner from '../components/BatchTestRunner';
 import CleanupButton from '../components/CleanupButton';
 import CiliumConfigButton from '../components/CiliumConfigButton';
 import CiliumConfigModal from '../components/CiliumConfigModal';
+import { generateCliCommand, getEnvironmentDisplayName } from '../config/executionConfig';
 
 export default function Home() {
   const [testQueue, setTestQueue] = useState([]);
@@ -16,6 +17,45 @@ export default function Home() {
   const [showCiliumModal, setShowCiliumModal] = useState(false);
   const [ciliumIsRunning, setCiliumIsRunning] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  
+  // Environment configuration for CLI commands
+  const [environmentConfig, setEnvironmentConfig] = useState(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(true);
+
+  // Fetch environment configuration
+  useEffect(() => {
+    const fetchEnvironmentConfig = async () => {
+      try {
+        setEnvironmentLoading(true);
+        const response = await fetch('/api/environment-config');
+        if (response.ok) {
+          const config = await response.json();
+          setEnvironmentConfig(config);
+          console.log('[Index] 🌍 Environment config loaded:', config.environmentName, config.mode);
+        } else {
+          console.error('[Index] Failed to fetch environment config');
+          setEnvironmentConfig({
+            mode: 'docker-compose',
+            environmentName: 'Local Development',
+            isKubernetes: false,
+            isDevelopment: true
+          });
+        }
+      } catch (error) {
+        console.error('[Index] Environment config fetch error:', error);
+        setEnvironmentConfig({
+          mode: 'docker-compose',
+          environmentName: 'Local Development',
+          isKubernetes: false,
+          isDevelopment: true
+        });
+      } finally {
+        setEnvironmentLoading(false);
+      }
+    };
+
+    fetchEnvironmentConfig();
+  }, []);
 
   const handleTestQueueChange = (newQueue) => {
     setTestQueue(newQueue);
@@ -178,9 +218,21 @@ export default function Home() {
     }
   };
 
-  const copyToClipboard = async (text) => {
+  // Generate environment-aware CLI command for test queue
+  const getEnvironmentAwareCommand = (testList) => {
+    if (environmentConfig?.isKubernetes && environmentConfig.realPodName) {
+      return `kubectl exec -it ${environmentConfig.realPodName} -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testList.join(',')} --verbose`;
+    } else if (environmentConfig?.isKubernetes) {
+      return `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testList.join(',')} --verbose`;
+    } else {
+      return `./k8s_diagnostic test list: ${testList.join(',')} --verbose`;
+    }
+  };
+
+  const copyToClipboard = async (testList) => {
+    const command = getEnvironmentAwareCommand(testList);
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(command);
       setCopyFeedback('✅ Copied!');
       setTimeout(() => setCopyFeedback(''), 2000);
     } catch (err) {
@@ -427,9 +479,9 @@ export default function Home() {
                             paddingRight: '30px'
                           }}
                         >
-                          ./k8s_diagnostic test list: {Array.from(customSelectedTests).join(',')} --verbose
+                          {getEnvironmentAwareCommand(Array.from(customSelectedTests))}
                           <span
-                            onClick={() => copyToClipboard(`./k8s_diagnostic test list: ${Array.from(customSelectedTests).join(',')} --verbose`)}
+                            onClick={() => copyToClipboard(Array.from(customSelectedTests))}
                             style={{
                               position: 'absolute',
                               right: '5px',

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getTestInsights } from '../utils/testInsights';
 import { TestDefinition, TestCollection, createTestCollection } from '../utils/testDefinitions';
+import { generateCliCommand, isKubernetesEnvironment, getEnvironmentDisplayName } from '../config/executionConfig';
 
 // Global bounce animation styles
 const bounceStyles = `
@@ -232,12 +233,19 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const [connectionLost, setConnectionLost] = useState(false); // Track SSE connection status
   const [showCliCommands, setShowCliCommands] = useState(false); // CLI commands visibility toggle
   
-  // 🕒 Progressive Status System - Track test timing for user feedback
+  // Server-side environment configuration
+  const [environmentConfig, setEnvironmentConfig] = useState(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(true);
+  
+  // DEDUPLICATION: Track whether structured cleanup events are being received
+  const [receivingStructuredEvents, setReceivingStructuredEvents] = useState(false);
+  
+  //Progressive Status System - Track test timing for user feedback
   const [testStartTimes, setTestStartTimes] = useState(new Map());
   const [testStatusMessages, setTestStatusMessages] = useState(new Map()); // Backend heartbeat messages
   const [statusUpdateCounter, setStatusUpdateCounter] = useState(0); // Force re-renders for status updates
 
-  // 🕒 Progressive status message logic with 1-minute increments
+  // Progressive status message logic with 1-minute increments
   const getRunningStatusMessage = (testName) => {
     const startTime = testStartTimes.get(testName);
     const customMessage = testStatusMessages.get(testName); // Backend heartbeat override
@@ -256,7 +264,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return "Running the test...";
   };
 
-  // 🎨 Progressive color logic based on timing
+  // Progressive color logic based on timing
   const getStatusColor = (testName) => {
     const startTime = testStartTimes.get(testName);
     if (!startTime) return '#10b981'; // Green
@@ -286,88 +294,145 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Stage-based message tracker to prevent duplicates using ref
   const lastPhaseMessageRef = useRef('');
+  
+  // Track displayed messages to prevent exact duplicates
+  const displayedMessages = useRef(new Set());
 
-  // Transform verbose output into clean stage-based updates
+  // Environment-aware transform for verbose output into clean stage-based updates
   const transformLine = (line) => {
     const trimmed = line.trim();
     
-    // Infrastructure phase grouping
-    if (trimmed.includes('Setting up test environment') || 
-        trimmed.includes('Collecting cluster infrastructure information')) {
-      const newMessage = '🔍 Infrastructure setup phase...';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
-      }
-      return ''; // Skip duplicates
+    // DEDUPLICATION: Skip cleanup messages if we're receiving structured cleanup events
+    const isCleanupMessage = trimmed.includes('🧹 Pre-test cleanup phase') || 
+                             trimmed.includes('CLEANUP PHASE') || 
+                             trimmed.includes('✅ Pre-test cleanup completed') ||
+                             trimmed.includes('universal_cleanup completed');
+    
+    if (isCleanupMessage && receivingStructuredEvents) {
+      console.log('[BatchTestRunner] 🚫 Skipping stdout cleanup message - using structured events instead:', trimmed.substring(0, 50));
+      return ''; // Skip stdout cleanup messages when structured events are available
     }
     
-    if (trimmed.includes('Infrastructure collection completed')) {
-      const newMessage = '✅ Infrastructure ready';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
-      }
-      return '';
-    }
+    // Only apply enhanced cleanup sequence logic in Kubernetes production mode
+    const isKubernetesMode = environmentConfig?.isKubernetes || false;
     
-    // CRITICAL: Handle direct backend cleanup messages
-    if (trimmed.includes('🧹 Pre-test cleanup phase')) {
-      const newMessage = '🧹 Pre-test cleanup phase...';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
-      }
-      return '';
-    }
-    
-    if (trimmed.includes('✅ Pre-test cleanup completed')) {
-      const newMessage = '✅ Pre-test cleanup completed';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
-      }
-      return '';
-    }
-    
-    // Legacy cleanup phase grouping (fallback)
-    if (trimmed.includes('CLEANUP PHASE') || trimmed.includes('Removing network policies') ||
-        trimmed.match(/├──.*Cilium Policies:/)) {
-      const newMessage = '🧹 Pre-test cleanup phase...';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
-      }
-      return '';
-    }
-    
-    if (trimmed.includes('universal_cleanup completed') || 
-        trimmed.includes('Cleanup completed successfully')) {
+    if (isKubernetesMode) {
+      // PRODUCTION MODE: Enhanced cleanup sequence with proper timing
       
-      // CRITICAL FIX: Context-aware cleanup completion mapping
-      // Determine if we're in pre-test or post-test cleanup based on actual test execution state
-      const hasTestsStarted = currentlyRunning.size > 0 || 
-                             Object.values(testResults).some(r => ['success', 'failed', 'running'].includes(r.status));
+      // Infrastructure phase grouping
+      if (trimmed.includes('Setting up test environment') || 
+          trimmed.includes('Collecting cluster infrastructure information')) {
+        const newMessage = '🔍 Infrastructure setup phase...';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return ''; // Skip duplicates
+      }
       
-      const newMessage = hasTestsStarted ? 
-        '✅ Post Test Cleanup COMPLETED' :     // After tests have actually run
-        '✅ Pre-test cleanup completed';       // Before tests have started
-        
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
+      if (trimmed.includes('Infrastructure collection completed')) {
+        const newMessage = '✅ Infrastructure ready';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return '';
       }
-      return '';
-    }
-    
-    // Test execution phase
-    if (trimmed.includes('Running test:') || trimmed.includes('Starting networking tests')) {
-      const newMessage = '🧪 Test execution phase...';
-      if (lastPhaseMessageRef.current !== newMessage) {
-        lastPhaseMessageRef.current = newMessage;
-        return newMessage;
+      
+      // PRODUCTION: Handle pre-test cleanup messages (only if not receiving structured events)
+      if (!receivingStructuredEvents && (trimmed.includes('🧹 Pre-test cleanup phase') || 
+          trimmed.includes('CLEANUP PHASE') || 
+          trimmed.includes('🚀 Starting optimized Kubernetes cleanup'))) {
+        const newMessage = '🧹 Pre-test cleanup phase...';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return '';
       }
-      return '';
+      
+      // PRODUCTION: Only show cleanup completion when actually completed (only if not receiving structured events)
+      if (!receivingStructuredEvents && (trimmed.includes('✅ Pre-test cleanup completed') || 
+          (trimmed.includes('universal_cleanup completed') && 
+           !Object.values(testResults).some(r => ['success', 'failed', 'running'].includes(r.status))))) {
+        const newMessage = '✅ Pre-test cleanup completed';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return '';
+      }
+      
+      // PRODUCTION: Test execution phase - show when tests actually start
+      if ((trimmed.includes('Running test:') || trimmed.includes('Starting networking tests') || 
+           trimmed.includes('🧪 Running diagnostic tests')) && 
+          !trimmed.includes('cleanup') && !trimmed.includes('CLEANUP')) {
+        const newMessage = '🧪 Test execution phase...';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return '';
+      }
+      
+      // PRODUCTION: Individual test progress (only when cleanup is done)
+      if (trimmed.includes('Running test:') && lastPhaseMessageRef.current !== '🧹 Pre-test cleanup phase...') {
+        const testMatch = trimmed.match(/Running test:\s*(.+?)(?:\s|$)/);
+        if (testMatch) {
+          return `🔬 Executing: ${testMatch[1]}`;
+        }
+      }
+      
+      // PRODUCTION: Post-test cleanup
+      if (trimmed.includes('universal_cleanup completed') && 
+          Object.values(testResults).some(r => ['success', 'failed'].includes(r.status))) {
+        const newMessage = '✅ Post-test cleanup completed';
+        if (lastPhaseMessageRef.current !== newMessage) {
+          lastPhaseMessageRef.current = newMessage;
+          return newMessage;
+        }
+        return '';
+      }
+      
+    } else {
+      // DEVELOPMENT MODE: Skip cleanup messages if structured events are available
+      
+      // Basic phase indicators for development
+      if (trimmed.includes('Setting up test environment')) {
+        return '🔍 Setting up test environment...';
+      }
+      
+      if (trimmed.includes('Infrastructure collection completed')) {
+        // DEDUPLICATION: Skip if we already have this message
+        if (lastPhaseMessageRef.current === '✅ Infrastructure ready') {
+          return '';
+        }
+        lastPhaseMessageRef.current = '✅ Infrastructure ready';
+        return '✅ Infrastructure ready';
+      }
+      
+      // DEVELOPMENT: Skip cleanup messages if receiving structured events
+      if (!receivingStructuredEvents && (trimmed.includes('CLEANUP PHASE') || trimmed.includes('Pre-test cleanup'))) {
+        // DEDUPLICATION: Skip if we already have this message
+        if (lastPhaseMessageRef.current === '🧹 Cleanup phase...') {
+          return '';
+        }
+        lastPhaseMessageRef.current = '🧹 Cleanup phase...';
+        return '🧹 Cleanup phase...';
+      }
+      
+      if (!receivingStructuredEvents && trimmed.includes('universal_cleanup completed')) {
+        // DEDUPLICATION: Skip if we already have this message
+        if (lastPhaseMessageRef.current === '✅ Cleanup completed') {
+          return '';
+        }
+        lastPhaseMessageRef.current = '✅ Cleanup completed';
+        return '✅ Cleanup completed';
+      }
+      
+      if (trimmed.includes('Running test:') || trimmed.includes('Starting networking tests')) {
+        return '🧪 Running tests...';
+      }
     }
     
     return ''; // Filter out everything else
@@ -394,8 +459,8 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     if (trimmed.includes('Collecting cluster infrastructure information')) return true;
     if (trimmed.includes('Infrastructure collection completed')) return true;
     if (trimmed.includes('CLEANUP PHASE')) return true;
-    if (trimmed.includes('🧹 Pre-test cleanup phase')) return true;  // CRITICAL: Allow backend cleanup messages
-    if (trimmed.includes('✅ Pre-test cleanup completed')) return true;  // CRITICAL: Allow cleanup completion
+    if (trimmed.includes('🧹 Pre-test cleanup phase')) return true;  // Allow backend cleanup messages
+    if (trimmed.includes('✅ Pre-test cleanup completed')) return true;  // Allow cleanup completion
     if (trimmed.includes('universal_cleanup completed')) return true;
     if (trimmed.includes('Running test:')) return true;
     if (trimmed.includes('Starting networking tests')) return true;
@@ -435,29 +500,37 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     setBackendError(null);
     setConnectionLost(false);
     
-    // 🧹 CRITICAL: Clear all progressive status state for fresh run
+    // 🧹 Clear all progressive status state for fresh run
     setTestStartTimes(new Map());
     setTestStatusMessages(new Map());
     setStatusUpdateCounter(0);
     
-    // 🧹 CRITICAL: Clear processed events and timing data
+    // 🧹 Clear processed events and timing data
     processedEvents.current.clear();
     lastTestActivity.current.clear();
     eventTimestamps.current.clear();
     testStateHistory.current.clear();
     stateTransitionLock.current.clear();
     
-    // CRITICAL: Reset phase message tracker for fresh run
+    // Reset phase message tracker for fresh run
     lastPhaseMessageRef.current = '';
+    
+    // 🚀 DEDUPLICATION: Reset structured events tracking for fresh run
+    setReceivingStructuredEvents(false);
+    
+    // 🚀 ENHANCED DEDUPLICATION: Clear displayed messages for fresh run
+    displayedMessages.current.clear();
 
     // 🧹 FRONTEND CLEANUP: Clear server-side event storage before starting
     try {
+      console.log('[BatchTestRunner] 🧹 DEBUG: Clearing server-side event storage...');
       await fetch('/api/log-events', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' }
       });
+      console.log('[BatchTestRunner] ✅ DEBUG: Server-side event storage cleared');
     } catch (cleanupError) {
-      // Silent cleanup error handling
+      console.log('[BatchTestRunner] ⚠️ DEBUG: Failed to clear server event storage:', cleanupError);
     }
 
     // Initialize test states for selected tests only
@@ -470,7 +543,13 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     setTestResults(initialResults);
     setTestOutputs(initialOutputs);
 
+    console.log('[BatchTestRunner] 🎯 DEBUG: About to make HTTP request to /api/run-batch-tests');
+    console.log('[BatchTestRunner] 📊 DEBUG: Request payload:', { testList: selectedTestsList, testId: newTestId });
+
     try {
+      const requestStart = Date.now();
+      console.log('[BatchTestRunner] 🚀 DEBUG: Making HTTP request to CLI container at', new Date().toISOString());
+      
       const response = await fetch('/api/run-batch-tests', {
         method: 'POST',
         headers: {
@@ -482,23 +561,36 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         })
       });
 
+      const requestDuration = Date.now() - requestStart;
+      console.log('[BatchTestRunner] 📡 DEBUG: HTTP response received after', requestDuration, 'ms');
+      console.log('[BatchTestRunner] 📊 DEBUG: Response status:', response.status, response.statusText);
+      console.log('[BatchTestRunner] 📊 DEBUG: Response headers:', Object.fromEntries(response.headers.entries()));
+
       if (!response.ok) {
+        console.log('[BatchTestRunner] ❌ DEBUG: HTTP response not OK, attempting to parse error...');
         const errorData = await response.json().catch(() => ({}));
+        console.log('[BatchTestRunner] ❌ DEBUG: Error data:', errorData);
         throw new Error(`HTTP error! status: ${response.status} - ${errorData.message || 'Unknown error'}`);
       }
 
+      console.log('[BatchTestRunner] ✅ DEBUG: HTTP response OK, starting to read SSE stream...');
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = ''; // Buffer to handle partial SSE events across chunks
+      let eventCount = 0;
 
       while (true) {
+        console.log('[BatchTestRunner] 🔄 DEBUG: Reading next chunk from SSE stream...');
         const { done, value } = await reader.read();
+        
         if (done) {
+          console.log('[BatchTestRunner] 🏁 DEBUG: SSE stream ended, processed', eventCount, 'events total');
           break;
         }
 
         // Decode chunk and add to buffer
         const chunk = decoder.decode(value, { stream: true });
+        console.log('[BatchTestRunner] 📨 DEBUG: Received chunk:', chunk.length, 'bytes');
         buffer += chunk;
 
         // Process complete lines from buffer
@@ -509,20 +601,24 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
+            eventCount++;
+            console.log('[BatchTestRunner] 📝 DEBUG: Processing SSE event #' + eventCount + ':', line.substring(0, 200) + (line.length > 200 ? '...' : ''));
             try {
               const eventData = JSON.parse(line.substring(6));
+              console.log('[BatchTestRunner] 📊 DEBUG: Parsed event data:', eventData.type, eventData.testName || 'no-test');
               handleTestEvent(eventData);
             } catch (parseError) {
-              // Silent parse error handling
+              console.log('[BatchTestRunner] ❌ DEBUG: Failed to parse SSE event:', parseError, 'Raw line:', line);
             }
           }
         }
       }
 
     } catch (err) {
+      console.log('[BatchTestRunner] ❌ DEBUG: Exception in runBatchTests:', err);
       setError(`Failed to execute batch tests: ${err.message}`);
       setIsRunning(false);
-      setIsLoading(false); // CRITICAL: Reset loading state on error
+      setIsLoading(false); // Reset loading state on error
       stopStatusPolling();
     }
   };
@@ -550,7 +646,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       });
 
       if (response.ok) {
-        // 🛡️ FIXED: Use atomic state updates for termination
+        // Use atomic state updates for termination
         setTestResults(prev => {
           const updated = { ...prev };
           Object.keys(updated).forEach(testName => {
@@ -568,27 +664,27 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         stopStatusPolling();
       } else {
         setError('Failed to stop tests - they may continue running');
-        // 🛡️ FIXED: Ensure modal stays hidden even if API fails
+        // Ensure modal stays hidden even if API fails
         setIsRunning(false);
       }
     } catch (err) {
       setError(`Failed to stop tests: ${err.message}`);
-      // 🛡️ FIXED: Ensure modal stays hidden even on exceptions
+      //Ensure modal stays hidden even on exceptions
       setIsRunning(false);
     }
     
-    // 🛡️ FINAL: Guarantee modal is hidden regardless of any issues above
+    // Guarantee modal is hidden regardless of any issues above
     setIsRunning(false);
     stopStatusPolling();
   };
 
-  // 🛡️ CRITICAL FIX: Mutex-protected progress calculation with state locking
+  //  Mutex-protected progress calculation with state locking
   const progressMutex = useRef(false);
   const lastValidProgress = useRef(0);
   const progressValidationHistory = useRef([]);
   
   const calculateProgress = (testResults, totalTests) => {
-    // 🔒 MUTEX PROTECTION: Prevent concurrent progress calculations
+    //MUTEX PROTECTION: Prevent concurrent progress calculations
     if (progressMutex.current) {
       return lastValidProgress.current;
     }
@@ -601,12 +697,12 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         return 0;
       }
       
-      // 🛡️ ENHANCED: Comprehensive state validation with corruption detection
+      // Comprehensive state validation with corruption detection
       const validResults = Object.values(testResults).filter(r => 
         r && typeof r.status === 'string' && r.status !== undefined
       );
       
-      // 🛡️ CRITICAL FIX: Count states atomically to prevent race conditions
+      //Count states atomically to prevent race conditions
       const statusCounts = {
         success: 0,
         failed: 0,
@@ -624,7 +720,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       
       const totalCompleted = statusCounts.success + statusCounts.failed + statusCounts.terminated;
       
-      // 🛡️ CRITICAL VALIDATION: Detect impossible state combinations
+      // VALIDATION: Detect impossible state combinations
       if (totalCompleted > totalTests) {
         return lastValidProgress.current; // Return last known good progress
       }
@@ -632,7 +728,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       const progressValue = Math.min(100, Math.max(0, (totalCompleted / totalTests) * 100));
       const rounded = Math.round(progressValue);
       
-      // 🛡️ CRITICAL FIX: Atomic backward movement prevention with state validation
+      // Atomic backward movement prevention with state validation
       const currentProgress = lastValidProgress.current;
       
       // Record progress validation attempt
@@ -650,7 +746,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         progressValidationHistory.current = progressValidationHistory.current.slice(-20);
       }
       
-      // 🛡️ ENHANCED: Strict backward movement validation
+      // Strict backward movement validation
       const isBackwardMovement = rounded < currentProgress;
       const isResetScenario = currentProgress === 100 && totalCompleted < totalTests;
       const isValidProgression = rounded >= currentProgress || isResetScenario;
@@ -659,7 +755,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         return currentProgress;
       }
       
-      // 🛡️ CRITICAL: Update last valid progress atomically
+      //Update last valid progress atomically
       lastValidProgress.current = rounded;
       
       // Log significant changes for monitoring (removed)
@@ -667,12 +763,12 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       return rounded;
       
     } finally {
-      // 🔒 MUTEX RELEASE: Always release mutex
+      // Always release mutex
       progressMutex.current = false;
     }
   };
 
-  // 🛡️ FIXED: Enhanced completion handler with state validation (LEGACY - kept for compatibility)
+  // Enhanced completion handler with state validation (LEGACY - kept for compatibility)
   const handleTestCompletion = (testName, completionData) => {
     console.log('[BatchTestRunner] � LEGACY completion handler called for:', testName, 'Success:', completionData.success);
     console.log('[BatchTestRunner] ℹ️  Note: This should now use updateTestStateAtomic for better state management');
@@ -705,7 +801,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     }
   };
 
-  // 🛡️ ENHANCED: Advanced event deduplication with sequence numbers and collision prevention
+  // Advanced event deduplication with sequence numbers and collision prevention
   const processedEvents = useRef(new Set());
   const eventSequence = useRef(0);
   const lastTestActivity = useRef(new Map()); // testName -> timestamp of last activity
@@ -713,7 +809,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   const testStateHistory = useRef(new Map()); // testName -> array of state transitions for debugging
   const eventTimestamps = useRef(new Map()); // testName -> last event timestamp to prevent out-of-order processing
 
-  // 🔒 ENHANCED: State transition validation with stale result detection
+  //State transition validation with stale result detection
   const isValidStateTransition = (testName, currentStatus, newStatus) => {
     // Define valid state transitions with stricter rules
     const validTransitions = {
@@ -726,7 +822,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       'terminated': [] // Final state - no transitions allowed to prevent stale results
     };
 
-    // CRITICAL FIX: Block ALL backend results after user termination (tests are sequential - later tests never ran)
+    // Block ALL backend results after user termination (tests are sequential - later tests never ran)
     if (currentStatus === 'terminated' && ['success', 'failed'].includes(newStatus)) {
       console.log(`[BatchTestRunner] 🛑 STALE RESULT BLOCKED: Ignoring backend ${newStatus} for ${testName} - tests are sequential, this test never ran after user termination`);
       return false;
@@ -755,7 +851,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return isValid;
   };
 
-  // 🔒 ENHANCED: True atomic state updates with mutex-style locking and queuing
+  //True atomic state updates with mutex-style locking and queuing
   const stateUpdateQueue = useRef(new Map()); // testName -> array of queued updates
   const activeMutex = useRef(new Map()); // testName -> boolean (active mutex)
   
@@ -792,7 +888,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return updatePromise;
   };
   
-  // 🔒 ENHANCED: Queue processor with true mutual exclusion
+  //Queue processor with true mutual exclusion
   const processStateUpdateQueue = async (testName) => {
     // Check if mutex is already active
     if (activeMutex.current.get(testName)) {
@@ -832,7 +928,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     }
   };
   
-  // 🔒 ENHANCED: Core state update with comprehensive validation
+  //Core state update with comprehensive validation
   const processStateUpdate = async (updateRequest) => {
     const { testName, newStatus, newMessage, additionalData, timestamp, id } = updateRequest;
     
@@ -901,13 +997,17 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
   };
 
   const handleTestEvent = async (eventData) => {
+    console.log('[BatchTestRunner] 🎯 DEBUG: handleTestEvent called with:', eventData);
+    
     // CRITICAL FIX: Ensure testName is always converted to string early to prevent object propagation
     const rawTestName = eventData.testName || eventData.data?.testName;
     const testName = typeof rawTestName === 'string' ? rawTestName : 
                      (rawTestName?.name || rawTestName?.testName || String(rawTestName || 'unknown-test'));
     const eventTimestamp = eventData.timestamp || Date.now();
     
-    // 🛡️ ENHANCED: Advanced event deduplication with collision prevention
+    console.log('[BatchTestRunner] 🔍 DEBUG: Extracted testName:', testName, 'from rawTestName:', rawTestName);
+    
+    // Advanced event deduplication with collision prevention
     eventSequence.current++;
     const eventKey = `${eventData.type}_${testName}_${eventSequence.current}_${eventTimestamp}_${Math.random().toString(36).substr(2, 9)}`;
     
@@ -935,6 +1035,8 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     eventsArray.slice(-100).forEach(key => processedEvents.current.add(key));
   }
     
+    console.log(`[BatchTestRunner] 📝 DEBUG: Processing event type: ${eventData.type} for test: ${testName}`);
+    
     // Only log critical events
     if (eventData.type === 'test_complete' || eventData.type === 'batch_complete') {
       console.log(`[BatchTestRunner] 🎯 ${eventData.type.toUpperCase()}:`, testName || 'batch', eventData);
@@ -953,18 +1055,23 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
       case 'test_start':
         if (testName) {
-          // 🕒 Track test start time for progressive status system
+          // Show test execution phase message when first test starts AND cleanup is complete
+          if (currentPhase === 'cleanup_complete') {
+            setFilteredOutput(prev => [...prev, '🧪 Test execution phase...']);
+          }
+          
+          // Track test start time for progressive status system
           setTestStartTimes(prev => {
             const newMap = new Map(prev);
             newMap.set(testName, Date.now());
             return newMap;
           });
           
-          // 🛡️ ENHANCED: Use async atomic state update with validation
+          // Use async atomic state update with validation
           const success = await updateTestStateAtomic(testName, 'running', 'Test in progress...');
           
           if (success) {
-            // 🛡️ FIXED: Simplified currentlyRunning management (atomic updates handle race conditions)
+            // Simplified currentlyRunning management (atomic updates handle race conditions)
             setCurrentlyRunning(prev => {
               const newSet = new Set(prev);
               newSet.add(testName);
@@ -988,6 +1095,59 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
             
             // Update activity timestamp with event timestamp
             lastTestActivity.current.set(testName, eventTimestamp);
+          }
+        }
+        break;
+
+      case 'cleanup_start':
+        //cleanup start events for proper sequencing
+        if (testName) {
+          console.log('[BatchTestRunner] 🧹 Cleanup started for:', testName);
+          const cleanupStartMessage = '🧹 Pre-test cleanup - STARTED';
+          // DEDUPLICATION: Check if this message was already displayed
+          if (!displayedMessages.current.has(cleanupStartMessage)) {
+            displayedMessages.current.add(cleanupStartMessage);
+            setFilteredOutput(prev => [...prev, cleanupStartMessage]);
+          }
+          setCurrentPhase('cleanup_running');
+          // DEDUPLICATION: Mark that we're receiving structured cleanup events
+          setReceivingStructuredEvents(true);
+        }
+        break;
+
+      case 'cleanup_complete':
+        // Handle cleanup complete events - enable test execution
+        if (testName) {
+          console.log('[BatchTestRunner] ✅ Cleanup completed for:', testName);
+          const cleanupCompleteMessage = '✅ Pre-test cleanup - COMPLETED';
+          // DEDUPLICATION: Check if this message was already displayed
+          if (!displayedMessages.current.has(cleanupCompleteMessage)) {
+            displayedMessages.current.add(cleanupCompleteMessage);
+            setFilteredOutput(prev => [...prev, cleanupCompleteMessage]);
+          }
+          setCurrentPhase('cleanup_complete');
+          // DEDUPLICATION: Continue tracking structured events
+          setReceivingStructuredEvents(true);
+        }
+        break;
+
+      case 'test_progress':
+        // Handle test progress events (new event type)
+        if (testName) {
+          console.log('[BatchTestRunner] Test progress:', testName, eventData.message);
+          if (eventData.message) {
+            setFilteredOutput(prev => [...prev, eventData.message]);
+          }
+        }
+        break;
+
+      case 'user_step':
+        // Handle user-friendly step messages (new event type)
+        if (testName && eventData.userMessage) {
+          console.log('[BatchTestRunner] User step:', testName, eventData.userMessage.title);
+          // Process user-friendly messages for better UI display
+          if (eventData.userMessage.title) {
+            setFilteredOutput(prev => [...prev, eventData.userMessage.title]);
           }
         }
         break;
@@ -1024,7 +1184,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
           // Add the clean test completion log
           console.log(`[BatchTestRunner] ${completionData.success ? '✅' : '❌'} Test completed: ${testName} - ${completionData.success ? 'PASSED' : 'FAILED'}`);
           
-          // 🛡️ ENHANCED: Use async atomic state update for completion with double-check
+          // Use async atomic state update for completion with double-check
           const newStatus = completionData.success ? 'success' : 'failed';
           const success = await updateTestStateAtomic(testName, newStatus, completionData.summary, {
             duration: completionData.duration,
@@ -1033,7 +1193,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
           });
           
           if (success) {
-            // 🛡️ ENHANCED: Atomic removal with validation
+            // Atomic removal with validation
             setCurrentlyRunning(prev => {
               const newSet = new Set(prev);
               
@@ -1045,7 +1205,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
               return newSet;
             });
             
-            // 🛡️ ENHANCED: Protected progress calculation with validation
+            // Protected progress calculation with validation
             setTimeout(() => {
               setTestResults(currentResults => {
                 // Validate that the test is actually completed before updating progress
@@ -1157,7 +1317,14 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         if (shouldDisplayLine(output)) {
           const transformedLine = transformLine(output);
           if (transformedLine && transformedLine.trim()) {
-            setFilteredOutput(prev => [...prev, transformedLine]);
+           // DEDUPLICATION: Check if this message was already displayed
+            if (!displayedMessages.current.has(transformedLine)) {
+              displayedMessages.current.add(transformedLine);
+              setFilteredOutput(prev => [...prev, transformedLine]);
+              console.log('[BatchTestRunner] ✅ New message added:', transformedLine);
+            } else {
+              console.log('[BatchTestRunner] 🚫 Duplicate message blocked:', transformedLine);
+            }
           }
         }
         break;
@@ -1166,6 +1333,19 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
         // Handle phase updates (setup, infrastructure, cleanup, testing)
         setCurrentPhase(eventData.phase);
         console.log('[BatchTestRunner] Phase update:', eventData.phase, eventData.message);
+        break;
+
+      case 'progress_update':
+        // Handle progress updates from CLI (including cleanup phases)
+        console.log('[BatchTestRunner] Progress update:', eventData.phase, eventData.message);
+        if (eventData.message) {
+          setFilteredOutput(prev => [...prev, eventData.message]);
+        }
+        
+        // Update current phase if provided (but filter out cleanup_completed)
+        if (eventData.phase && eventData.phase !== 'cleanup_completed') {
+          setCurrentPhase(eventData.phase);
+        }
         break;
 
       case 'raw_output':
@@ -1205,6 +1385,43 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return '';
   };
 
+  // 🚀 NEW: Fetch server-side environment configuration
+  useEffect(() => {
+    const fetchEnvironmentConfig = async () => {
+      try {
+        setEnvironmentLoading(true);
+        const response = await fetch('/api/environment-config');
+        if (response.ok) {
+          const config = await response.json();
+          setEnvironmentConfig(config);
+          console.log('[BatchTestRunner] 🌍 Environment config loaded:', config.environmentName, config.mode);
+        } else {
+          console.error('[BatchTestRunner] Failed to fetch environment config');
+          // Fallback to client-side detection
+          setEnvironmentConfig({
+            mode: 'docker-compose',
+            environmentName: 'Local Development',
+            isKubernetes: false,
+            isDevelopment: true
+          });
+        }
+      } catch (error) {
+        console.error('[BatchTestRunner] Environment config fetch error:', error);
+        // Fallback to client-side detection
+        setEnvironmentConfig({
+          mode: 'docker-compose',
+          environmentName: 'Local Development',
+          isKubernetes: false,
+          isDevelopment: true
+        });
+      } finally {
+        setEnvironmentLoading(false);
+      }
+    };
+
+    fetchEnvironmentConfig();
+  }, []);
+
   // Initialize empty test states and cleanup on unmount
   useEffect(() => {
     // Initialize skeleton test states for display
@@ -1231,7 +1448,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     setSelectedTests(new Set(newCollection.getAll().map(test => test.id)));
   }, [testQueue]);
 
-  // 🕒 Status update interval for progressive status system - OPTIMIZED
+  // Status update interval for progressive status system - OPTIMIZED
   useEffect(() => {
     if (currentlyRunning.size === 0) return;
     
@@ -1314,7 +1531,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     return 1.0;
   };
 
-  // Enhanced line formatter for better visual hierarchy
+  // line formatter for better visual hierarchy
   const formatTerminalLine = (line, index) => {
     const trimmedLine = line.trim();
     
@@ -1437,7 +1654,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
 
   // Generate rich terminated display format for user-stopped tests
   const generateRichTerminatedDisplay = (testName, result) => {
-    // CRITICAL FIX: Ensure testName is always a string to prevent "[object Object]" display
+    // Ensure testName is always a string to prevent "[object Object]" display
     const testNameString = typeof testName === 'string' ? testName : 
                            (testName?.name || testName?.testName || String(testName || 'unknown-test'));
     const duration = result.duration || '0';
@@ -1452,13 +1669,25 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
     };
   };
 
-  // Copy CLI command to clipboard
+  // Server-side environment-aware CLI command generation and clipboard copy
   const copyCommandToClipboard = async (testName) => {
-    const command = `./k8s_diagnostic test list: ${testName} --verbose`;
+    let command;
+    
+    if (environmentConfig && environmentConfig.sampleCommands) {
+      // Use server-side generated command
+      command = environmentConfig.sampleCommands[testName] || 
+               (environmentConfig.isKubernetes 
+                 ? `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`
+                 : `./k8s_diagnostic test list: ${testName} --verbose`);
+    } else {
+      // Fallback to client-side generation
+      command = generateCliCommand(testName);
+    }
+    
     try {
       await navigator.clipboard.writeText(command);
-      // Could add a toast notification here
-      console.log(`[BatchTestRunner] Copied command to clipboard: ${command}`);
+      const envType = environmentConfig?.environmentName || 'Unknown';
+      console.log(`[BatchTestRunner] Copied ${envType} command to clipboard: ${command}`);
     } catch (err) {
       console.error('[BatchTestRunner] Failed to copy to clipboard:', err);
       // Fallback: select text (older browser support)
@@ -1469,6 +1698,23 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
       document.execCommand('copy');
       document.body.removeChild(textArea);
     }
+  };
+
+  // Get environment-aware CLI command for display
+  const getCliCommandForDisplay = (testName) => {
+    if (environmentConfig && environmentConfig.sampleCommands) {
+      return environmentConfig.sampleCommands[testName] || 
+             (environmentConfig.isKubernetes 
+               ? `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testName} --verbose`
+               : `./k8s_diagnostic test list: ${testName} --verbose`);
+    }
+    // Fallback to client-side generation
+    return generateCliCommand(testName);
+  };
+
+  // Get environment display name
+  const getEnvironmentDisplayNameFromConfig = () => {
+    return environmentConfig?.environmentName || getEnvironmentDisplayName();
   };
 
   // Handler for starting tests
@@ -1767,7 +2013,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   </button>
                 )}
 
-                {/* Test Header - ENHANCED: Show clear differentiation */}
+                {/* Test Header : Show clear differentiation */}
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex-1 pr-8">
                     <h3 className="font-poppins font-semibold text-gray-900 flex items-center">
@@ -1801,7 +2047,7 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                   </div>
                 </div>
 
-                {/* CLI Command Section - Terminal Style */}
+                {/* CLI Command Section - Environment-Aware Terminal Style */}
                 {showCliCommands && (
                   <div className="rounded text-white cli-command mb-3" style={{
                     fontFamily: 'Monaco, Menlo, Consolas, "Courier New", monospace',
@@ -1816,7 +2062,17 @@ export default function BatchTestRunner({ testQueue, onBack, onTestComplete }) {
                     display: 'block',
                     position: 'relative'
                   }}>
-                    ./k8s_diagnostic test list: {testNameString} --verbose
+                    {/* Environment-aware command display */}
+                    {getCliCommandForDisplay(testNameString)}
+                    {/* Environment indicator */}
+                    <div style={{
+                      fontSize: '0.625rem',
+                      color: 'rgb(156, 163, 175)',
+                      marginTop: '2px',
+                      fontStyle: 'italic'
+                    }}>
+                      {getEnvironmentDisplayNameFromConfig()} Mode
+                    </div>
                     <span 
                       title="Copy command to clipboard"
                       onClick={() => copyCommandToClipboard(testNameString)}

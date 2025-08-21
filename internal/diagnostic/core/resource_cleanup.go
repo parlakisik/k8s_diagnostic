@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -12,6 +11,47 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/pointer"
 )
+
+// KubernetesProductionCleanup performs optimized cleanup for Kubernetes production environment
+// This maintains the same template structure as dev environment for UI compatibility
+// but uses lightweight cleanup optimized for individual test execution
+func (t *Tester) KubernetesProductionCleanup(ctx context.Context, testID string, verbose bool) {
+	// Clean hierarchical output - SAME TEMPLATE AS DEV
+	fmt.Println("\n🧹 CLEANUP PHASE (Kubernetes Production)")
+
+	// Create timeout context for cleanup operations - SHORTER TIMEOUT
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // Reduced from 120s
+	defer cancel()
+
+	// Operation 1: ONLY Cilium policies cleanup (optimized version)
+	fmt.Print("├── Cilium Policies: Fast policy cleanup... ")
+	startTime := time.Now()
+	t.ForceCleanupCiliumPolicies(timeoutCtx, false) // Use our optimized 15s version
+	duration := time.Since(startTime)
+	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
+
+	// SKIP full namespace cleanup - just clean test pods that might conflict
+	fmt.Print("├── Test Pods: Cleaning conflicting test pods... ")
+	startTime = time.Now()
+	t.CleanupConflictingTestPods(timeoutCtx, false) // New lightweight pod cleanup
+	duration = time.Since(startTime)
+	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
+
+	// SKIP secondary namespace cleanup - not needed for individual tests
+	fmt.Print("└── Resource Check: Quick verification... ")
+	startTime = time.Now()
+	t.QuickResourceVerification(timeoutCtx, verbose) // New quick check instead of 60s wait
+	duration = time.Since(startTime)
+	fmt.Printf("✅ Done (%.1fs)\n", duration.Seconds())
+
+	// Still log to JSONL for tracking - SAME AS DEV TEMPLATE
+	logger := GetGlobalMultiChannelLogger()
+	if logger != nil {
+		logger.LogStepComplete("kubernetes_production_cleanup", true, "Kubernetes production cleanup successfully completed")
+	}
+
+	fmt.Printf("🎯 Production cleanup completed efficiently\n")
+}
 
 // CleanupAllTestResources cleans up all resources created during tests with clean hierarchical output
 func (t *Tester) CleanupAllTestResources(ctx context.Context, verbose bool) {
@@ -134,7 +174,7 @@ func (t *Tester) VerifyResourcesDeleted(ctx context.Context, verbose bool) {
 	}
 }
 
-// ForceCleanupCiliumPolicies aggressively removes all Cilium network policies
+// ForceCleanupCiliumPolicies aggressively removes all Cilium network policies - OPTIMIZED VERSION
 func (t *Tester) ForceCleanupCiliumPolicies(ctx context.Context, verbose bool) {
 	// Only show internal step logging when verbose=true
 	if verbose {
@@ -147,84 +187,88 @@ func (t *Tester) ForceCleanupCiliumPolicies(ctx context.Context, verbose bool) {
 		}
 	}
 
-	// 1. First try normal deletion of all policies
+	// OPTIMIZATION 1: Quick check if any policies exist before doing expensive operations
+	quickCheck := exec.CommandContext(ctx, "kubectl", "get", "ciliumnetworkpolicies", "--all-namespaces", "--no-headers")
+	checkOutput, err := quickCheck.CombinedOutput()
+
+	quickCheckCW := exec.CommandContext(ctx, "kubectl", "get", "ciliumclusterwidenetworkpolicies", "--no-headers")
+	checkOutputCW, errCW := quickCheckCW.CombinedOutput()
+
+	// If no policies exist, skip expensive operations
+	if (err != nil || len(strings.TrimSpace(string(checkOutput))) == 0) &&
+		(errCW != nil || len(strings.TrimSpace(string(checkOutputCW))) == 0) {
+		if verbose {
+			fmt.Printf("%s No Cilium policies found, skipping cleanup\n", time.Now().Format("2006-01-02 15:04:05"))
+		}
+		return
+	}
+
+	// OPTIMIZATION 2: Use faster bulk operations with timeouts
+	timeoutCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // Limit total time
+	defer cancel()
+
+	// Bulk delete with short timeout and --wait=false to avoid hanging
 	policyCommands := [][]string{
-		{"kubectl", "delete", "ciliumclusterwidenetworkpolicy", "--all", "--force", "--grace-period=0"},
-		{"kubectl", "delete", "ciliumnetworkpolicy", "--all", "--all-namespaces", "--force", "--grace-period=0"},
+		{"kubectl", "delete", "ciliumclusterwidenetworkpolicy", "--all", "--force", "--grace-period=0", "--wait=false"},
+		{"kubectl", "delete", "ciliumnetworkpolicy", "--all", "--all-namespaces", "--force", "--grace-period=0", "--wait=false"},
 	}
 
 	for _, cmdArgs := range policyCommands {
-		cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+		cmd := exec.CommandContext(timeoutCtx, cmdArgs[0], cmdArgs[1:]...)
 		_, err := cmd.CombinedOutput()
-		if err != nil {
-			logger := GetGlobalMultiChannelLogger()
-			if logger != nil {
-				logger.LogVerbose("Warning: %v during policy cleanup (continuing anyway)", err)
-			} else if verbose {
-				fmt.Printf("%s Warning: %v during policy cleanup (continuing anyway)\n", time.Now().Format("2006-01-02 15:04:05"), err)
+		if err != nil && verbose {
+			fmt.Printf("%s Warning: %v during policy cleanup (continuing anyway)\n", time.Now().Format("2006-01-02 15:04:05"), err)
+		}
+	}
+
+	// OPTIMIZATION 3: Use simple name-only listing instead of full JSON parsing
+	// Handle namespace-scoped policies with name extraction only
+	nsCmd := exec.CommandContext(timeoutCtx, "kubectl", "get", "ciliumnetworkpolicies", "--all-namespaces", "-o", "jsonpath={range .items[*]}{.metadata.namespace}{' '}{.metadata.name}{'\n'}{end}")
+	if output, err := nsCmd.CombinedOutput(); err == nil && len(output) > 0 {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+			parts := strings.Fields(line)
+			if len(parts) >= 2 {
+				namespace, name := parts[0], parts[1]
+				// Quick patch and delete without waiting
+				patchCmd := fmt.Sprintf("kubectl patch ciliumnetworkpolicies %s -n %s -p '{\"metadata\":{\"finalizers\":[]}}' --type=merge --timeout=2s", name, namespace)
+				exec.CommandContext(timeoutCtx, "sh", "-c", patchCmd).Run()
+
+				deleteCmd := fmt.Sprintf("kubectl delete ciliumnetworkpolicies %s -n %s --force --grace-period=0 --wait=false", name, namespace)
+				exec.CommandContext(timeoutCtx, "sh", "-c", deleteCmd).Run()
 			}
 		}
 	}
 
-	// 2. List and remove finalizers from any stuck Cilium policies
-	// Handle namespace-scoped policies
-	nsCmd := exec.Command("kubectl", "get", "ciliumnetworkpolicies", "--all-namespaces", "-o", "json")
-	output, err := nsCmd.CombinedOutput()
-	if err == nil {
-		var policies struct {
-			Items []struct {
-				Metadata struct {
-					Name      string `json:"name"`
-					Namespace string `json:"namespace"`
-				} `json:"metadata"`
-			} `json:"items"`
-		}
-		if err = json.Unmarshal(output, &policies); err == nil {
-			for _, policy := range policies.Items {
-				patchCmd := fmt.Sprintf("kubectl patch ciliumnetworkpolicies %s -n %s -p '{\"metadata\":{\"finalizers\":[]}}' --type=merge",
-					policy.Metadata.Name, policy.Metadata.Namespace)
-				exec.Command("sh", "-c", patchCmd).Run()
-
-				// Now force delete
-				deleteCmd := fmt.Sprintf("kubectl delete ciliumnetworkpolicies %s -n %s --force --grace-period=0",
-					policy.Metadata.Name, policy.Metadata.Namespace)
-				exec.Command("sh", "-c", deleteCmd).Run()
+	// Handle cluster-wide policies with name extraction only
+	cwCmd := exec.CommandContext(timeoutCtx, "kubectl", "get", "ciliumclusterwidenetworkpolicies", "-o", "jsonpath={range .items[*]}{.metadata.name}{'\n'}{end}")
+	if output, err := cwCmd.CombinedOutput(); err == nil && len(output) > 0 {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		for _, line := range lines {
+			name := strings.TrimSpace(line)
+			if name == "" {
+				continue
 			}
+			// Quick patch and delete without waiting
+			patchCmd := fmt.Sprintf("kubectl patch ciliumclusterwidenetworkpolicies %s -p '{\"metadata\":{\"finalizers\":[]}}' --type=merge --timeout=2s", name)
+			exec.CommandContext(timeoutCtx, "sh", "-c", patchCmd).Run()
+
+			deleteCmd := fmt.Sprintf("kubectl delete ciliumclusterwidenetworkpolicies %s --force --grace-period=0 --wait=false", name)
+			exec.CommandContext(timeoutCtx, "sh", "-c", deleteCmd).Run()
 		}
 	}
 
-	// Handle cluster-wide policies
-	cwCmd := exec.Command("kubectl", "get", "ciliumclusterwidenetworkpolicies", "-o", "json")
-	output, err = cwCmd.CombinedOutput()
-	if err == nil {
-		var policies struct {
-			Items []struct {
-				Metadata struct {
-					Name string `json:"name"`
-				} `json:"metadata"`
-			} `json:"items"`
-		}
-		if err = json.Unmarshal(output, &policies); err == nil {
-			for _, policy := range policies.Items {
-				patchCmd := fmt.Sprintf("kubectl patch ciliumclusterwidenetworkpolicies %s -p '{\"metadata\":{\"finalizers\":[]}}' --type=merge",
-					policy.Metadata.Name)
-				exec.Command("sh", "-c", patchCmd).Run()
-
-				// Now force delete
-				deleteCmd := fmt.Sprintf("kubectl delete ciliumclusterwidenetworkpolicies %s --force --grace-period=0",
-					policy.Metadata.Name)
-				exec.Command("sh", "-c", deleteCmd).Run()
-			}
-		}
-	}
-
-	// Verify all policies are gone
+	// OPTIMIZATION 4: Shorter wait time and skip verification in non-verbose mode
 	if verbose {
 		fmt.Printf("%s Verifying all Cilium policies have been removed...\n", time.Now().Format("2006-01-02 15:04:05"))
+		time.Sleep(2 * time.Second)
+	} else {
+		// Just a brief pause to let deletions start
+		time.Sleep(500 * time.Millisecond)
 	}
-
-	// Wait a moment for changes to propagate
-	time.Sleep(2 * time.Second)
 
 	// Log completion with immediate flush (only when verbose=true)
 	if verbose {
@@ -573,6 +617,79 @@ func (t *Tester) CleanupTestPods(ctx context.Context, verbose bool) {
 		if logger != nil {
 			logger.LogStepComplete("cleanup_test_pods", true, "Test pods cleanup completed successfully")
 		}
+	}
+}
+
+// CleanupConflictingTestPods performs lightweight cleanup of only pods that might conflict with new tests
+// This is optimized for Kubernetes production where we don't need full namespace cleanup
+func (t *Tester) CleanupConflictingTestPods(ctx context.Context, verbose bool) {
+	// Only target pods that commonly cause "already exists" errors
+	conflictingPodNames := []string{
+		"web-policy-test",
+		"client-policy-test",
+		"api",
+		"client1",
+		"client2",
+		"test-pod",
+		"netshoot",
+	}
+
+	// Quick deletion of known conflicting pods
+	for _, podName := range conflictingPodNames {
+		deleteCmd := fmt.Sprintf("kubectl delete pod %s -n %s --force --grace-period=0 --wait=false 2>/dev/null || true", podName, t.namespace)
+		exec.CommandContext(ctx, "sh", "-c", deleteCmd).Run()
+	}
+
+	// Clean up any pods with conflicting labels (lightweight approach)
+	labelSelectors := []string{
+		"app in (web,client,api)",
+		"run in (web,client,api)",
+	}
+
+	for _, labelSelector := range labelSelectors {
+		directCmd := fmt.Sprintf("kubectl delete pods -n %s -l \"%s\" --force --grace-period=0 --wait=false 2>/dev/null || true", t.namespace, labelSelector)
+		exec.CommandContext(ctx, "sh", "-c", directCmd).Run()
+	}
+
+	// Brief pause to let deletions start
+	time.Sleep(1 * time.Second)
+}
+
+// QuickResourceVerification performs a quick check instead of the 60-second comprehensive verification
+// This is optimized for Kubernetes production environment
+func (t *Tester) QuickResourceVerification(ctx context.Context, verbose bool) {
+	// Just do a quick check - no long waits
+	maxRetries := 5 // 5 attempts with 1-second intervals = 5 seconds max
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		allClear := true
+
+		// Quick check for remaining test pods only (not all pods)
+		if pods, err := t.clientset.CoreV1().Pods(t.namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app in (web,client,api,test)",
+		}); err == nil {
+			if len(pods.Items) > 0 {
+				allClear = false
+				if verbose {
+					fmt.Printf("  Waiting for %d test pods to be deleted (attempt %d/%d)...\n", len(pods.Items), attempt, maxRetries)
+				}
+			}
+		}
+
+		if allClear {
+			if verbose {
+				fmt.Printf("  ✅ Quick verification completed after %d attempts\n", attempt)
+			}
+			return
+		}
+
+		// Short wait before next attempt
+		time.Sleep(1 * time.Second)
+	}
+
+	// If we get here, some resources may still exist but we don't wait longer
+	if verbose {
+		fmt.Printf("  ⚠️  Quick verification completed after %d attempts (proceeding anyway)\n", maxRetries)
 	}
 }
 

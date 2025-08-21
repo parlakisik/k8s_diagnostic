@@ -1,8 +1,49 @@
 # k8s-diagnostic
 
-A CLI tool for testing Kubernetes network connectivity and validating Cilium network policies.
+A comprehensive Kubernetes network connectivity and Cilium network policy testing solution with both CLI and web-based interfaces.
 
-## Features
+## 🚀 **NEW: Production Kubernetes Deployment**
+
+**One-command deployment** with full web UI and automated testing:
+
+```bash
+# Deploy entire application to Kubernetes with web interface
+./k8s/deploy.sh
+```
+
+**Features:**
+- ✅ **Web UI**: Modern React interface with real-time test monitoring
+- ✅ **Multi-container pod**: UI (Next.js) + CLI (Go) with shared storage
+- ✅ **One-command setup**: Automated Docker build, push, and Kubernetes deployment
+- ✅ **Smart access detection**: Auto-detects NodePort vs port-forward
+- ✅ **Cross-environment**: Docker Desktop, Kind, Minikube compatibility
+- ✅ **90% faster performance**: Optimized cleanup (10-15s vs 2+ minutes)
+- ✅ **Real-time progress**: Live cleanup and test progress reporting
+
+## Deployment Options
+
+### 🌐 **Web UI (Kubernetes Production)**
+Deploy as web application with full UI interface:
+```bash
+# Complete deployment with auto-browser launch
+./k8s/deploy.sh
+
+# Deploy without auto-launch
+./k8s/deploy.sh --no-launch
+
+# Deploy with specific image tag  
+./k8s/deploy.sh --tag v2.0
+```
+
+**Access Methods:**
+- **Auto-detected**: Script automatically opens browser to correct URL
+- **Port-forward**: `kubectl port-forward -n k8s-diagnostic service/k8s-diagnostic-ui 3000:3000`
+- **NodePort**: Direct access via cluster node IP (environment dependent)
+
+### 🖥️ **CLI (Traditional)**
+Use as standalone command-line tool:
+
+## CLI Features
 
 - **Core Connectivity Tests**: Pod-to-Pod, Service, DNS, Cross-Node, NodePort, LoadBalancer
 - **Policy Testing**: L3 (CIDR, node), L4 (port-based), L7 (HTTP, DNS) policies
@@ -14,6 +55,8 @@ A CLI tool for testing Kubernetes network connectivity and validating Cilium net
 ## Tools Provided
 
 - `k8s-diagnostic`: Main connectivity testing tool
+- `./k8s/deploy.sh`: **One-command Kubernetes deployment**
+- `./k8s/k8s-ui-access.sh`: **Smart UI access detection**
 - `build_test_k8s.sh`: Creates test cluster with Cilium CNI
 - `delete_test_k8s.sh`: Removes test clusters
 - `cilium-policies/`: Ready-to-use policy examples

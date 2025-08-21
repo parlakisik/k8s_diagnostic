@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { generateCliCommand, getEnvironmentDisplayName } from '../config/executionConfig';
 
 const DIAGNOSTIC_QUESTIONS = [
   {
@@ -128,6 +129,45 @@ export default function DiagnosticQuestions({ onTestQueueChange, resetTrigger })
   const [selectedQuestions, setSelectedQuestions] = useState(new Set());
   const [allDiscoveredTests, setAllDiscoveredTests] = useState([]);
   const [copyFeedback, setCopyFeedback] = useState('');
+  
+  // Environment configuration for CLI commands
+  const [environmentConfig, setEnvironmentConfig] = useState(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(true);
+
+  // Fetch environment configuration
+  useEffect(() => {
+    const fetchEnvironmentConfig = async () => {
+      try {
+        setEnvironmentLoading(true);
+        const response = await fetch('/api/environment-config');
+        if (response.ok) {
+          const config = await response.json();
+          setEnvironmentConfig(config);
+          console.log('[DiagnosticQuestions] 🌍 Environment config loaded:', config.environmentName, config.mode);
+        } else {
+          console.error('[DiagnosticQuestions] Failed to fetch environment config');
+          setEnvironmentConfig({
+            mode: 'docker-compose',
+            environmentName: 'Local Development',
+            isKubernetes: false,
+            isDevelopment: true
+          });
+        }
+      } catch (error) {
+        console.error('[DiagnosticQuestions] Environment config fetch error:', error);
+        setEnvironmentConfig({
+          mode: 'docker-compose',
+          environmentName: 'Local Development',
+          isKubernetes: false,
+          isDevelopment: true
+        });
+      } finally {
+        setEnvironmentLoading(false);
+      }
+    };
+
+    fetchEnvironmentConfig();
+  }, []);
 
   // Reset internal state when parent requests it
   useEffect(() => {
@@ -219,9 +259,21 @@ export default function DiagnosticQuestions({ onTestQueueChange, resetTrigger })
 
   const isQuestionSelected = (questionId) => selectedQuestions.has(questionId);
 
-  const copyToClipboard = async (text) => {
+  // Generate environment-aware CLI command for test queue
+  const getEnvironmentAwareCommand = (testList) => {
+    if (environmentConfig?.isKubernetes && environmentConfig.realPodName) {
+      return `kubectl exec -it ${environmentConfig.realPodName} -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testList.join(',')} --verbose`;
+    } else if (environmentConfig?.isKubernetes) {
+      return `kubectl exec -it [pod-name] -n k8s-diagnostic -c cli -- ./k8s-diagnostic test list: ${testList.join(',')} --verbose`;
+    } else {
+      return `./k8s_diagnostic test list: ${testList.join(',')} --verbose`;
+    }
+  };
+
+  const copyToClipboard = async (testList) => {
+    const command = getEnvironmentAwareCommand(testList);
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(command);
       setCopyFeedback('✅ Copied!');
       setTimeout(() => setCopyFeedback(''), 2000);
     } catch (err) {
@@ -428,9 +480,9 @@ export default function DiagnosticQuestions({ onTestQueueChange, resetTrigger })
                     paddingRight: '30px'
                   }}
                 >
-                  ./k8s_diagnostic test list: {testQueue.join(',')} --verbose
+                  {getEnvironmentAwareCommand(testQueue)}
                   <span
-                    onClick={() => copyToClipboard(`./k8s_diagnostic test list: ${testQueue.join(',')} --verbose`)}
+                    onClick={() => copyToClipboard(testQueue)}
                     style={{
                       position: 'absolute',
                       right: '5px',

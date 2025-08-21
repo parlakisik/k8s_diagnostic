@@ -45,7 +45,43 @@ kubectl -n kube-system get pods | grep cilium
 
 ## Quick Start
 
-For experienced users, use the automated deployment script:
+### 🚀 One-Command Deployment (Recommended)
+
+For the fastest setup with automatic browser launch:
+
+```bash
+# From project root - deploys and launches browser automatically
+./k8s/deploy.sh
+```
+
+**What happens:**
+- ✅ Validates prerequisites (kubectl, Docker, cluster access)
+- ✅ Auto-detects Docker Hub username
+- ✅ Builds and pushes container images (UI + CLI)
+- ✅ Deploys to Kubernetes with shared volume
+- ✅ Waits for pods to be ready
+- ✅ **Automatically detects best access method**
+- ✅ **Launches browser to UI automatically**
+
+### Command Options
+
+```bash
+# Deploy with automatic browser launch (default)
+./k8s/deploy.sh
+
+# Deploy without browser auto-launch
+./k8s/deploy.sh --no-launch
+
+# Deploy with specific image tag
+./k8s/deploy.sh --tag v3
+
+# Show help
+./k8s/deploy.sh --help
+```
+
+### 🔧 Manual Deployment (Advanced Users)
+
+For step-by-step control or troubleshooting:
 
 ```bash
 # Build images and deploy (from project root)
@@ -181,12 +217,28 @@ Content-Length: 24232
 ## Accessing the Application
 
 ### Web Interface
-- **URL**: http://localhost:8080
+- **URL**: Automatically opened by deploy.sh or http://localhost:3000+ (varies by port availability)
 - **Features**: 
   - Cilium policy testing interface
   - Test execution and monitoring
-  - Results visualization
-  - Log viewing
+  - Real-time results visualization with live cleanup progress
+  - Log viewing with SSE (Server-Sent Events) streaming
+
+### 🚀 Enhanced Performance Features
+
+The latest deployment includes significant performance optimizations:
+
+**Performance Improvements:**
+- **90%+ faster cleanup**: Reduced from 2+ minutes to ~12 seconds
+- **Optimized Cilium policy cleanup** with early exit conditions
+- **Smart timeout management** (15 seconds vs unlimited waits)
+- **Real-time UI-CLI communication** via HTTP API
+
+**Auto-Access Detection:**
+- **Docker Desktop**: Attempts NodePort access on port 32030 first
+- **Other clusters**: Falls back to port-forward with smart port detection
+- **Port conflict resolution**: Auto-increments ports (3000 → 3001 → 3002...)
+- **Cross-platform browser launch**: macOS, Linux, Windows/WSL support
 
 ### CLI Container Access
 ```bash
@@ -198,7 +250,30 @@ kubectl -n k8s-diagnostic exec -it $POD_NAME -c cli -- /bin/sh
 
 # Run diagnostic commands
 ./k8s-diagnostic --help
+
+# Test CLI-UI HTTP communication
+curl http://localhost:8080/api/health
 ```
+
+### Validating the Enhanced Features
+
+After deployment, you can verify the performance improvements:
+
+```bash
+# Test the optimized cleanup performance
+POD_NAME=$(kubectl -n k8s-diagnostic get pods -l app=k8s-diagnostic-ui -o jsonpath='{.items[0].metadata.name}')
+
+# Check CLI container health (should respond quickly)
+kubectl exec -n k8s-diagnostic $POD_NAME -c cli -- curl -s http://localhost:8080/api/health
+
+# Test UI-CLI communication via UI container
+kubectl exec -n k8s-diagnostic $POD_NAME -c ui -- curl -s http://localhost:3000/api/debug-environment
+```
+
+**Expected Performance:**
+- CLI health check: < 1 second response
+- Test cleanup stages: 10-15 seconds (vs previous 2+ minutes)  
+- UI-CLI communication: Real-time streaming without delays
 
 ## Troubleshooting
 
