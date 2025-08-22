@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import LogViewer from './LogViewer';
 import ResultsViewer from './ResultsViewer';
 import ProgressIndicator from './ProgressIndicator';
+import { generateCliCommand, getEnvironmentDisplayName } from '../config/executionConfig';
 
 export default function TestRunner({ selectedQuestion, onBack, onComplete }) {
   const [isRunning, setIsRunning] = useState(false);
@@ -21,6 +22,10 @@ export default function TestRunner({ selectedQuestion, onBack, onComplete }) {
   const [statusPolling, setStatusPolling] = useState(false);
   const statusIntervalRef = useRef(null);
   const [jsonlFound, setJsonlFound] = useState(false);
+  
+  // Environment configuration for CLI commands
+  const [environmentConfig, setEnvironmentConfig] = useState(null);
+  const [environmentLoading, setEnvironmentLoading] = useState(true);
 
   // Start periodic status polling
   const startStatusPolling = (testId) => {
@@ -243,6 +248,41 @@ export default function TestRunner({ selectedQuestion, onBack, onComplete }) {
     }
   };
 
+  // Fetch environment configuration
+  useEffect(() => {
+    const fetchEnvironmentConfig = async () => {
+      try {
+        setEnvironmentLoading(true);
+        const response = await fetch('/api/environment-config');
+        if (response.ok) {
+          const config = await response.json();
+          setEnvironmentConfig(config);
+          console.log('[TestRunner] 🌍 Environment config loaded:', config.environmentName, config.mode);
+        } else {
+          console.error('[TestRunner] Failed to fetch environment config');
+          setEnvironmentConfig({
+            mode: 'docker-compose',
+            environmentName: 'Local Development',
+            isKubernetes: false,
+            isDevelopment: true
+          });
+        }
+      } catch (error) {
+        console.error('[TestRunner] Environment config fetch error:', error);
+        setEnvironmentConfig({
+          mode: 'docker-compose',
+          environmentName: 'Local Development',
+          isKubernetes: false,
+          isDevelopment: true
+        });
+      } finally {
+        setEnvironmentLoading(false);
+      }
+    };
+
+    fetchEnvironmentConfig();
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -407,14 +447,19 @@ export default function TestRunner({ selectedQuestion, onBack, onComplete }) {
           </div>
         </div>
 
-        {/* CLI Command Display */}
+        {/* Environment-Aware CLI Command Display */}
         <div className="bg-gray-50 p-3 rounded-lg border-l-4 border-gray-400">
           <div className="flex items-center space-x-2 mb-1">
             <span className="text-gray-500 text-sm font-semibold">Executing:</span>
             <span className="text-xs text-gray-500">({testId})</span>
+            <span className="text-xs text-blue-600 ml-auto">
+              {environmentConfig?.environmentName || 'Loading...'} Mode
+            </span>
           </div>
           <code className="text-sm font-mono text-gray-700">
-            {selectedQuestion.cliCommand}
+            {environmentConfig && environmentConfig.sampleCommands && selectedQuestion.testType 
+              ? environmentConfig.sampleCommands[selectedQuestion.testType] || selectedQuestion.cliCommand
+              : selectedQuestion.cliCommand}
           </code>
         </div>
 
